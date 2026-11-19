@@ -321,12 +321,13 @@
           const mainTxt = isSearching
             ? `Searching${net?.searchingCode ? ' (' + net.searchingCode + ')' : '...'}`
             : `Room Code: ${net?.roomCode || '----'}   •   ${seats.length}/6`;
+          const showSub = !!(net?.searchStatus);
           ctx.font = `400 34px ${fontSciFae}`;
           ctx.fillStyle = isOverLimit ? '#ff6b6b' : '#ffffff';
-          ctx.fillText(mainTxt, 0, isSearching && net?.searchStatus ? -11 : 1);
-          if (isSearching && net?.searchStatus) {
+          ctx.fillText(mainTxt, 0, showSub ? -11 : 1);
+          if (showSub) {
             ctx.font = '600 13px "Orbitron", "Inter", sans-serif';
-            ctx.fillStyle = '#38bdf8';
+            ctx.fillStyle = net.searchStatus.includes('Dropped') || net.searchStatus.includes('Error') ? '#fbbf24' : '#38bdf8';
             ctx.fillText(net.searchStatus, 0, 18);
           }
           ctx.restore();

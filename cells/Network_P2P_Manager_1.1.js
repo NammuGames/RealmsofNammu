@@ -384,6 +384,59 @@
     }
   };
 
+  /** Transfers live Host authority to another connected peer seamlessly. */
+  proto.passHost = function(targetPeerId = null) {
+    if (this.role !== 'host') return false;
+    const candidates = Array.from(this.connections.keys());
+    const nextHostId = targetPeerId || candidates[0];
+    if (!nextHostId || !this.connections.has(nextHostId)) {
+      global.GameState?.showToast?.('⚠️ No connected guest available for Pass Host.');
+      return false;
+    }
+    this.pendingHostOfferToPeerId = null;
+
+    const snap = global.MemoryCardManager?.saveActivePuzzleMatch?.() || null;
+    const payload = {
+      type: 'HOST_HANDOFF',
+      newHostPeerId: nextHostId,
+      seatOwners: this.seatOwners,
+      peers: Array.from(this.peerMeta.entries()),
+      snap
+    };
+    this._broadcast(payload);
+    this._acceptHostHandoff(payload);
+    return true;
+  };
+
+  proto._acceptHostHandoff = function(msg) {
+    const nextHost = msg.newHostPeerId;
+    this.hostPeerId = nextHost;
+    this.pendingHostOfferToPeerId = null;
+    this.pendingHostOfferForMe = false;
+    if (Array.isArray(msg.seatOwners)) this.seatOwners = msg.seatOwners.slice();
+    if (Array.isArray(msg.peers)) this.peerMeta = new Map(msg.peers);
+
+    if (this.myPeerId === nextHost) {
+      this.role = 'host';
+      if (global.GameState) global.GameState.roleBadge = 'Host';
+      if (msg.snap && global.MemoryCardManager) global.MemoryCardManager.saveActivePuzzleMatch();
+      global.GameState?.showToast?.('👑 You are now the Match Host!');
+    } else {
+      this.role = 'guest';
+      if (global.GameState) global.GameState.roleBadge = 'Player';
+      if (!this.connections.has(nextHost) && this.peer) {
+        const conn = this.peer.connect(nextHost, { reliable: true });
+        this._wireConnection(conn, () => {
+          const prof = global.MemoryCardManager?.getProfile?.() || { name: 'Player' };
+          conn.send({ type: 'HELLO', peerId: this.myPeerId, name: prof.name || 'Player' });
+          this._updateDrawerUI?.();
+        });
+      }
+      global.GameState?.showToast?.('🔄 Host transferred smoothly');
+    }
+    this._updateDrawerUI?.();
+  };
+
   // ── TUNING DRAWER P2P CONTROLS ────────────────────────────────────────────
   proto._wireDrawerUI = function() {
     const d = document;

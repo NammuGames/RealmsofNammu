@@ -33,6 +33,7 @@
       wrappedNewRound = res.wrappedNewRound;
       if (res.matchEnded) {
         if (!state.isMatchEnding) this.isEndingTurn = false;
+        global.NetworkP2PManager?.onTurnAdvancementComplete?.();
         state.syncUI();
         global.BoardRenderer?.render?.();
         return;
@@ -113,22 +114,30 @@
         state.upDownAxisState = 0;
         state.placementCursor = { q: 0, r: 0 };
 
-        const activeMat = state.getActiveMaterial ? state.getActiveMaterial() : null;
-        if (activeMat && activeMat.activeCoords && global.BoardRippleRenderer?.playMaterialSpawnPulse) {
-          const coordsWithColors = activeMat.activeCoords.map(([dq, dr], idx) => ({
-            q: (state.placementCursor?.q || 0) + dq,
-            r: (state.placementCursor?.r || 0) + dr,
-            color: activeMat.colors[idx] || 'blue'
-          }));
-          const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);
-          global.BoardRippleRenderer.playMaterialSpawnPulse(coordsWithColors, () => {
+        // Sync canonical turn-start state to remote peers AFTER Phase E finalizes tray & piece state
+        global.NetworkP2PManager?.onTurnAdvancementComplete?.();
+
+        const isSpectatingRemote = !!(global.NetworkP2PManager?.isConnected?.() && !global.NetworkP2PManager.isLocalPlayersTurn());
+        if (isSpectatingRemote) {
+          state.isMaterialSelected = false;
+        } else {
+          const activeMat = state.getActiveMaterial ? state.getActiveMaterial() : null;
+          if (activeMat && activeMat.activeCoords && global.BoardRippleRenderer?.playMaterialSpawnPulse) {
+            const coordsWithColors = activeMat.activeCoords.map(([dq, dr], idx) => ({
+              q: (state.placementCursor?.q || 0) + dq,
+              r: (state.placementCursor?.r || 0) + dr,
+              color: activeMat.colors[idx] || 'blue'
+            }));
+            const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);
+            global.BoardRippleRenderer.playMaterialSpawnPulse(coordsWithColors, () => {
+              global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
+              state.syncUI();
+              global.UICardsDeck?.syncSpellbookColumnWithGameState?.();
+              global.BoardRenderer?.render?.();
+            }, h3Sec);
+          } else if (activeMat) {
             global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
-            state.syncUI();
-            global.UICardsDeck?.syncSpellbookColumnWithGameState?.();
-            global.BoardRenderer?.render?.();
-          }, h3Sec);
-        } else if (activeMat) {
-          global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
+          }
         }
 
         const pLabel = (state.playerCount > 1) ? `Player ${state.currentPlayerId || 1} • ` : '';

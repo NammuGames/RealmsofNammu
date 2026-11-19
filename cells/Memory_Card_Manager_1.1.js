@@ -226,6 +226,8 @@
     g.matchStarted = true;
     g.isMatchStarting = false;
     g.isMatchEnding = false;
+    g.isSequentialPlacing = false;
+    if (global.TurnManager) global.TurnManager.isEndingTurn = false;
 
     if (global.ComponentDisease) {
       global.ComponentDisease.reset();
@@ -247,6 +249,20 @@
       g.hp = snap.hp ?? 12;
       g.maxHp = snap.maxHp || 12;
       g.pendingHeal = snap.pendingHeal || 0;
+    }
+
+    const net = global.NetworkP2PManager;
+    const isOnline = !!net?.isConnected?.();
+    const isMyTurn = !isOnline || net.isLocalPlayersTurn();
+    if (!g.placedThisTurn && !g.gameOver) {
+      if (isMyTurn) {
+        if ((!g.tray || !g.tray.length || !g.getActiveMaterial?.()) && typeof g.refillTray === 'function') {
+          g.refillTray();
+        }
+        g.isMaterialSelected = true;
+      } else {
+        g.isMaterialSelected = false;
+      }
     }
 
     if (global.BoardRenderer) {

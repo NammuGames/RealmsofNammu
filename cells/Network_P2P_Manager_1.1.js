@@ -363,9 +363,6 @@
         const res = origComplete.apply(this, args);
         const curIdx = global.GameState?.activePlayerIndex || 0;
         if (self.isSeatLocal(curIdx)) self.lastLocalActivePlayerIndex = curIdx;
-        if (!self._applyingRemote && self.isConnected()) {
-          self.syncFullState('TURN_END');
-        }
         self._updateDrawerUI();
         return res;
       };
@@ -382,6 +379,16 @@
         return res;
       };
     }
+  };
+
+  /** Invoked at the end of TurnManager Phase E (after tray refill & piece spawn state are finalized). */
+  proto.onTurnAdvancementComplete = function() {
+    const curIdx = global.GameState?.activePlayerIndex || 0;
+    if (this.isSeatLocal(curIdx)) this.lastLocalActivePlayerIndex = curIdx;
+    if (!this._applyingRemote && this.isConnected()) {
+      this.syncFullState('TURN_END');
+    }
+    this._updateDrawerUI();
   };
 
   /** Transfers live Host authority to another connected peer seamlessly. */

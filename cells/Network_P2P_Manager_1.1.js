@@ -14,10 +14,8 @@
     return;
   }
 
-  proto._broadcast = function(msg, excludePeerId = null) {
-    this.connections.forEach((conn, pid) => {
-      if (pid !== excludePeerId && conn.open) conn.send(msg);
-    });
+  proto._broadcast = function(msg) {
+    this._publishRoom?.(msg, '*');
   };
 
   proto._assignDefaultSeats = function(playerCount = 6) {
@@ -111,9 +109,7 @@
       this._broadcastRoster();
       this._notifyLobbyUpdate();
     } else if (this.role === 'guest' && this.isConnected()) {
-      const hostConn = this.connections.get(this.hostPeerId) || Array.from(this.connections.values())[0];
-      const prof = global.MemoryCardManager?.getProfile?.() || { name: 'Guest' };
-      if (hostConn?.open) hostConn.send({ type: 'HELLO', peerId: this.myPeerId, name: prof.name || 'Guest', localPlayerCount: clean });
+      this._sendHello?.();
       this._notifyLobbyUpdate();
     }
   };
@@ -124,17 +120,28 @@
 
     if (msg.type === 'HELLO' && this.role === 'host') {
       const seatCount = Math.max(1, Math.min(6, msg.localPlayerCount || 1));
+      const wasConnected = this.connections.has(fromPeerId);
+      this.connections.set(fromPeerId, { peer: fromPeerId, open: true, lastSeen: Date.now() });
       const existing = this.peerMeta.get(fromPeerId);
       const seatIdx = existing?.seatIndex ?? this.seatOwners.length;
       this.peerMeta.set(fromPeerId, { name: msg.name || `Player ${seatIdx + 1}`, seatIndex: seatIdx, localPlayerCount: seatCount });
       this._rebuildSeatRoster();
       this._broadcastRoster();
+      if (!wasConnected && global.GameState?.matchStarted) {
+        const snap = global.MemoryCardManager?.capturePuzzleState?.();
+        if (snap) this._publishRoom?.({ type: 'STATE_SYNC', reason: 'JOIN', snap }, fromPeerId);
+      }
       this._updateDrawerUI();
       this._notifyLobbyUpdate();
       return;
     }
 
     if (msg.type === 'ROOM_ROSTER') {
+      if (this.role === 'guest') {
+        this._onGuestConnectedToHost?.(msg.hostPeerId || fromPeerId);
+        const listed = Array.isArray(msg.seatOwners) && msg.seatOwners.includes(this.myPeerId);
+        if (!listed) this._sendHello?.();
+      }
       this.roomCode = msg.roomCode || this.roomCode;
       if (msg.matchName) this.matchName = msg.matchName;
       if (msg.presetName) this.hostPresetName = msg.presetName;
@@ -181,7 +188,6 @@
     }
 
     if (msg.type === 'PLAYER_FORFEIT' && typeof msg.seatIndex === 'number') {
-      if (this.role === 'host') this._broadcast(msg, fromPeerId);
       this._applyingRemote = true;
       try { global.GameSettingsCanvas?.forfeitPlayerByIndex?.(msg.seatIndex, { fromRemote: true }); }
       finally { this._applyingRemote = false; }
@@ -194,35 +200,27 @@
     }
 
     if (msg.type === 'CURSOR_STATE') {
-      if (this.role === 'host') this._broadcast(msg, fromPeerId);
-      this._applyCursorState(msg);
+      if (!this.turnOnlySync) this._applyCursorState(msg);
       return;
     }
 
     if (msg.type === 'ACTION') {
-      if (this.role === 'host') this._broadcast(msg, fromPeerId);
-      this._applyRemoteAction(msg);
+      if (!this.turnOnlySync) this._applyRemoteAction(msg);
       return;
     }
 
     if (msg.type === 'STATE_SYNC' && msg.snap) {
-      if (this.role === 'host') this._broadcast(msg, fromPeerId);
       this._applyRemoteStateSync(msg.snap);
     }
   };
 
   proto._emit = function(type, payload = {}) {
     if (!this.isConnected() || this._applyingRemote) return;
-    const msg = { type, sender: this.myPeerId, ...payload };
-    if (this.role === 'host') {
-      this._broadcast(msg);
-    } else {
-      const hostConn = this.connections.get(this.hostPeerId) || Array.from(this.connections.values())[0];
-      if (hostConn?.open) hostConn.send(msg);
-    }
+    this._publishRoom?.({ type, sender: this.myPeerId, ...payload }, '*');
   };
 
   proto.broadcastCursorThrottled = function() {
+    if (this.turnOnlySync) return;
     const now = performance.now();
     if (now - this._lastCursorEmitMs < 65) return;
     this._lastCursorEmitMs = now;
@@ -308,7 +306,7 @@
         const orig = g[m];
         g[m] = guardTurn(function(...args) {
           const res = orig.apply(this, args);
-          if (!self._applyingRemote && self.isConnected()) {
+          if (!self._applyingRemote && self.isConnected() && !self.turnOnlySync) {
             if (m === 'moveDirection') self._emit('ACTION', { op: 'MOVE', dir: args[0] });
             else if (m === 'rotatePiece') self._emit('ACTION', { op: 'ROTATE', dir: args[0] });
             else if (m === 'placeActiveMaterial') { self._emit('ACTION', { op: 'PLACE' }); self.syncFullState('PLACE'); }
@@ -324,7 +322,7 @@
       const origClick = global.InputController.handleBoardClick;
       global.InputController.handleBoardClick = guardTurn(function(sx, sy) {
         const res = origClick.call(this, sx, sy);
-        if (!self._applyingRemote && self.isConnected()) {
+        if (!self._applyingRemote && self.isConnected() && !self.turnOnlySync) {
           self._emit('ACTION', { op: 'CLICK', sx, sy });
           self.broadcastCursorThrottled();
         }
@@ -340,7 +338,7 @@
       const origUndo = global.UndoManager.undoLastAction;
       global.UndoManager.undoLastAction = guardTurn(function(...args) {
         const res = origUndo.apply(this, args);
-        if (!self._applyingRemote && self.isConnected() && res !== false) {
+        if (!self._applyingRemote && self.isConnected() && res !== false && !self.turnOnlySync) {
           self._emit('ACTION', { op: 'UNDO' });
           self.syncFullState('UNDO');
         }
@@ -353,7 +351,7 @@
       global.TurnManager.endTurn = guardTurn(function(...args) {
         const res = origEnd.apply(this, args);
         if (!self._applyingRemote && self.isConnected() && res !== false) {
-          self._emit('ACTION', { op: 'END_TURN' });
+          if (!self.turnOnlySync) self._emit('ACTION', { op: 'END_TURN' });
           setTimeout(() => { self.syncFullState('TURN_END'); self._updateDrawerUI(); }, 350);
         }
         return res;
@@ -419,22 +417,23 @@
     if (this.myPeerId === nextHost) {
       this.role = 'host';
       if (global.GameState) global.GameState.roleBadge = 'Host';
+      this.peerMeta.forEach((_, pid) => {
+        if (pid !== this.myPeerId && !this.connections.has(pid)) {
+          this.connections.set(pid, { peer: pid, open: true, lastSeen: Date.now() });
+        }
+      });
+      this._rebuildSeatRoster();
+      this._broadcastRoster();
       if (msg.snap && global.MemoryCardManager) global.MemoryCardManager.saveActivePuzzleMatch();
       global.GameState?.showToast?.('👑 You are now the Match Host!');
     } else {
       this.role = 'guest';
       if (global.GameState) global.GameState.roleBadge = 'Player';
-      if (!this.connections.has(nextHost) && this.peer) {
-        const conn = this.peer.connect(nextHost, { reliable: true });
-        this._wireConnection(conn, () => {
-          const prof = global.MemoryCardManager?.getProfile?.() || { name: 'Player' };
-          conn.send({ type: 'HELLO', peerId: this.myPeerId, name: prof.name || 'Player' });
-          this._updateDrawerUI?.();
-        });
-      }
+      if (nextHost) this.connections.set(nextHost, { peer: nextHost, open: true, lastSeen: Date.now() });
       global.GameState?.showToast?.('🔄 Host transferred smoothly');
     }
     this._updateDrawerUI?.();
+    this._notifyLobbyUpdate?.();
   };
 
   // ── TUNING DRAWER P2P CONTROLS ────────────────────────────────────────────

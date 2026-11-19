@@ -372,6 +372,7 @@
     getScoreSubPodCenter() {
       const top = this.topPodNode;
       const val = this.statValNodes?.['score'];
+      if (val?.worldMatrix) return { x: val.worldMatrix[4], y: val.worldMatrix[5] };
       const topX = top ? top.position.x : ((this.viewWidth || (typeof window !== 'undefined' ? window.innerWidth : 1920)) * 0.5);
       const topY = top ? top.position.y : (this.config.podEdgeY || 42);
       const valX = val?.position?.x ?? 0;

@@ -14,6 +14,8 @@
       this.hubContext = null;
       this.games = new Map();
       this.loadedScripts = new Map();
+      this._preloadPromises = new Map();
+      this._progressSubs = new Map();
       this.activeGameId = null;
       this.isLoading = false;
       this.onReturnToHub = null;
@@ -120,6 +122,55 @@
     }
 
     /**
+     * Preloads a game's entry script and ordered module list without mounting it yet.
+     * Shares an in-flight promise so background loading cleanly joins with launchGame().
+     * @param {string} id
+     * @param {Function} [onProgress]
+     * @returns {Promise<boolean>}
+     */
+    preloadGame(id, onProgress = null) {
+      const meta = this.games.get(id);
+      if (!meta) return Promise.resolve(false);
+      if (onProgress) {
+        const subs = this._progressSubs.get(id) || [];
+        subs.push(onProgress);
+        this._progressSubs.set(id, subs);
+      }
+      if (this._preloadPromises.has(id)) return this._preloadPromises.get(id);
+
+      const emit = (done, total) => {
+        (this._progressSubs.get(id) || []).forEach((fn) => {
+          try { fn(done, total); } catch (_) {}
+        });
+      };
+
+      const p = (async () => {
+        await this.loadScript(meta.entryScript);
+        const entry = global.GAME_ENTRIES?.[id];
+        if (!entry || typeof entry.mount !== 'function') {
+          throw new Error(`Game entry "${id}" did not register window.GAME_ENTRIES["${id}"].mount()`);
+        }
+        if (Array.isArray(entry.scripts) && entry.scripts.length > 0 && !entry._scriptsLoaded) {
+          const resolved = entry.scripts.map((s) => this.resolvePath(meta.basePath, s));
+          await this.loadScriptSequence(resolved, emit);
+          entry._scriptsLoaded = true;
+        } else {
+          emit(1, 1);
+        }
+        return true;
+      })().catch((err) => {
+        this._preloadPromises.delete(id);
+        console.error(`[Hub_Game_Loader] Preload failed for "${id}":`, err);
+        return false;
+      }).finally(() => {
+        this._progressSubs.delete(id);
+      });
+
+      this._preloadPromises.set(id, p);
+      return p;
+    }
+
+    /**
      * Loads and mounts a registered game on demand over the running Hub runtime.
      * @param {string} id
      * @param {Object} [opts]
@@ -140,22 +191,16 @@
           await this.unloadCurrentGame({ silentReturn: true });
         }
 
-        await this.loadScript(meta.entryScript);
+        const loaded = await this.preloadGame(id, opts.onProgress);
         const entry = global.GAME_ENTRIES?.[id];
-        if (!entry || typeof entry.mount !== 'function') {
-          throw new Error(`Game entry "${id}" did not register window.GAME_ENTRIES["${id}"].mount()`);
-        }
-
-        if (Array.isArray(entry.scripts) && entry.scripts.length > 0 && !entry._scriptsLoaded) {
-          const resolved = entry.scripts.map((s) => this.resolvePath(meta.basePath, s));
-          await this.loadScriptSequence(resolved, opts.onProgress);
-          entry._scriptsLoaded = true;
+        if (!loaded || !entry || typeof entry.mount !== 'function') {
+          throw new Error(`Game entry "${id}" unavailable after preload.`);
         }
 
         if (typeof opts.onBeforeMount === 'function') {
           await opts.onBeforeMount();
         }
-        await entry.mount(this.hubContext, meta);
+        await entry.mount(this.hubContext, meta, opts);
         this.activeGameId = id;
         if (typeof this.onGameMounted === 'function') {
           this.onGameMounted(id, meta);

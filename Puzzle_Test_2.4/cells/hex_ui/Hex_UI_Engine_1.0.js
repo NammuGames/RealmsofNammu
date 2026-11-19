@@ -44,6 +44,9 @@
       this.customBoardWidth = null;
       this.isPortrait = false;
       this.hudScale = 1.0;
+      this.stageScale = 1.0;
+      this.dpr = 1.0;
+      this.boardContentAlpha = 1.0;
     }
 
     /**
@@ -268,8 +271,11 @@
         this.boardFrame.render(ctx);
 
         // Render game board content inside board frame clipping aperture
-        if (typeof this.boardRenderDelegate === 'function') {
+        if (typeof this.boardRenderDelegate === 'function' && (this.boardContentAlpha ?? 1.0) > 0.001) {
           ctx.save();
+          if ((this.boardContentAlpha ?? 1.0) < 0.999) {
+            ctx.globalAlpha *= Math.max(0, this.boardContentAlpha);
+          }
           const w = this.boardFrame.worldMatrix;
           ctx.setTransform(w[0], w[1], w[2], w[3], w[4], w[5]);
 

@@ -158,7 +158,7 @@
     id: 'puzzle',
     scripts: PUZZLE_SCRIPTS,
 
-    mount(ctx = {}) {
+    mount(ctx = {}, _meta = {}, opts = {}) {
       const state = ctx.state || global.COSMOS_STATE;
       const dom = ctx.dom || {};
       const warp = ctx.warp || global.CosmicDomainWarp;
@@ -237,9 +237,13 @@
         _puzzleMountedOnce = true;
       } else {
         if (boardRenderer) boardRenderer.mount(engine);
-        if (statPod) {
-          if (engine.topPod) engine.topPod.visible = true;
-          if (engine.bottomPod) engine.bottomPod.visible = true;
+        if (statPod?.topPodNode) {
+          engine.setTopPod(statPod.topPodNode);
+          statPod.topPodNode.visible = true;
+        }
+        if (global.NativeVitalityPod?.botPodNode) {
+          engine.setBottomPod(global.NativeVitalityPod.botPodNode);
+          global.NativeVitalityPod.botPodNode.visible = true;
         }
       }
 
@@ -261,7 +265,7 @@
         global.NetworkP2PManager.hookPuzzleNetwork();
       }
 
-      if (global.GameSettingsCanvas) {
+      if (!opts?.skipAutoMenu && global.GameSettingsCanvas) {
         global.GameSettingsCanvas.openSetupMenu('btn-nav-menu', { silent: true });
       }
       if (global.ResponsiveViewportAdapter?.syncViewport) {

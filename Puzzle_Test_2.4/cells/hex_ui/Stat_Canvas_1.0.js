@@ -226,8 +226,8 @@
         this.node._dirtyGeometry = true;
       };
 
-      this.listTrait.handleWheel = function(deltaY) {
-        if (!this.allowManualScroll || !this.node) return;
+      this.listTrait.getMaxScroll = function() {
+        if (!this.node) return 0;
         const items = this.node.children;
         let totalH = 0;
         for (let i = 0; i < items.length; i++) {
@@ -235,8 +235,11 @@
         }
         totalH -= self.config.playerPodSpacing;
         const canvasH = self.containerNode?.dimensions?.hBase || 800;
-        const maxScroll = Math.max(0, totalH - canvasH + 80);
-        this.targetScrollOffset = Math.max(-maxScroll, Math.min(0, this.targetScrollOffset - deltaY * 0.6));
+        return Math.max(0, totalH - canvasH + 80);
+      };
+
+      this.listTrait.handleWheel = function(deltaY) {
+        this.scrollBy(-deltaY * 0.6, false);
       };
 
       listContainer.addTrait(this.listTrait);

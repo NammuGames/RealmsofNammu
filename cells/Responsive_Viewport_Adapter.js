@@ -11,6 +11,9 @@
 
   const OVERLAY_ID = 'rotate-landscape-overlay';
   const STYLE_ID = 'responsive-viewport-adapter-css';
+  const VIRTUAL_BASE_W = 1920;
+  const VIRTUAL_BASE_H = 880;
+  const MAX_DPR = 2;
 
   class ResponsiveViewportAdapterClass {
     constructor() {
@@ -21,12 +24,17 @@
       this.overlayEl = null;
       this.isPortrait = false;
       this.viewportClass = 'desktop'; // 'desktop' | 'compact-landscape' | 'portrait-locked'
+      this.dpr = 1.0;
+      this.stageScale = 1.0;
+      this.cssWidth = VIRTUAL_BASE_W;
+      this.cssHeight = VIRTUAL_BASE_H;
+      this.virtualWidth = VIRTUAL_BASE_W;
+      this.virtualHeight = VIRTUAL_BASE_H;
       this.sidebarScale = 1.0;
       this.podScale = 1.0;
       this.overlayScale = 1.0;
       this._initialized = false;
       this._wrappedEngine = false;
-      this._wrappedTween = false;
     }
 
     init(ctx = {}) {
@@ -43,7 +51,6 @@
       }
 
       this._hookEngineResize();
-      this._hookTweenOrchestrator();
       this.syncViewport();
       return true;
     }
@@ -153,70 +160,58 @@
       if (!engine || this._wrappedEngine) return;
       const origResize = engine.resize.bind(engine);
       engine.resize = (w, h) => {
-        origResize(w, h);
-        this.applyLayoutToEngine(w, h);
+        const vw = this._syncing ? w : (this.virtualWidth || w);
+        const vh = this._syncing ? h : (this.virtualHeight || h);
+        origResize(vw, vh);
+        this.applyLayoutToEngine(vw, vh);
       };
       if (typeof engine.setStudioOverlay === 'function') {
         const origSetOverlay = engine.setStudioOverlay.bind(engine);
         engine.setStudioOverlay = (node) => {
           origSetOverlay(node);
           if (node) {
-            this.applyLayoutToEngine(engine.viewWidth || global.innerWidth, engine.viewHeight || global.innerHeight);
+            this.applyLayoutToEngine(this.virtualWidth || engine.viewWidth, this.virtualHeight || engine.viewHeight);
           }
         };
       }
       this._wrappedEngine = true;
     }
 
-    _hookTweenOrchestrator() {
-      const tweens = global.TweenOrchestrator;
-      if (!tweens || this._wrappedTween || typeof tweens.expandFrame !== 'function') return;
-      const origExpand = tweens.expandFrame.bind(tweens);
-      const self = this;
-      tweens.expandFrame = function(containerNode, origin, options = {}) {
-        const isRootChild = !containerNode?.parent || containerNode.parent === global.HexUIEngine?.root;
-        const isHub = containerNode?.id === 'hub-core-stage';
-        if (isRootChild && !isHub && options.targetScale === undefined) {
-          options = { ...options, targetScale: self.getOverlayTargetScale(containerNode) };
-        }
-        return origExpand(containerNode, origin, options);
-      };
-      this._wrappedTween = true;
-    }
-
-    /** Computes desktop vs compact-landscape target scale for centered Puzzle overlays. */
-    getOverlayTargetScale(node) {
-      const vw = this.engine?.viewWidth || global.innerWidth || 1920;
-      const vh = this.engine?.viewHeight || global.innerHeight || 1080;
-      if (vw >= 1200 && vh >= 720) return 1.0;
-
-      const baseW = node?.dimensions ? (node.dimensions.wBase + 2 * node.dimensions.apex) : 1400;
-      const baseH = node?.dimensions ? node.dimensions.hBase : 800;
-      const sidebarScreenW = Math.round(240 * this.sidebarScale);
-      const availW = Math.max(220, vw - 2 * (sidebarScreenW + 10));
-      const availH = Math.max(180, vh - 24);
-      return Math.max(0.24, Math.min(1.0, availW / baseW, availH / baseH));
-    }
-
+    /** Computes desktop vs virtual-anchored scale and keeps backing canvas Retina-crisp. */
     syncViewport() {
       const canvasWarp = this.dom?.canvasWarp || document.getElementById('canvas-domain-warp');
       const canvasBoard = this.dom?.canvasBoard || document.getElementById('canvas-board-overlay');
       const container = this.dom?.viewport || document.getElementById('viewport-container');
       const rect = (canvasBoard || container)?.getBoundingClientRect?.();
-      const vw = Math.max(240, Math.round((rect && rect.width > 0 ? rect.width : 0) || global.visualViewport?.width || global.innerWidth || 1280));
-      const vh = Math.max(180, Math.round((rect && rect.height > 0 ? rect.height : 0) || global.visualViewport?.height || global.innerHeight || 720));
-      this.isPortrait = vh > vw;
+      const cssW = Math.max(240, Math.round((rect && rect.width > 0 ? rect.width : 0) || global.visualViewport?.width || global.innerWidth || 1280));
+      const cssH = Math.max(180, Math.round((rect && rect.height > 0 ? rect.height : 0) || global.visualViewport?.height || global.innerHeight || 720));
+      this.isPortrait = cssH > cssW;
+
+      const dpr = Math.min(MAX_DPR, Math.max(1, global.devicePixelRatio || 1));
+      const stageScale = Math.min(1.0, cssW / VIRTUAL_BASE_W, cssH / VIRTUAL_BASE_H);
+      const virtualW = cssW / stageScale;
+      const virtualH = cssH / stageScale;
+
+      this.dpr = dpr;
+      this.stageScale = stageScale;
+      this.cssWidth = cssW;
+      this.cssHeight = cssH;
+      this.virtualWidth = virtualW;
+      this.virtualHeight = virtualH;
+
+      const backW = Math.max(1, Math.round(cssW * dpr));
+      const backH = Math.max(1, Math.round(cssH * dpr));
       const warpScale = this.state?.warpRenderScale || 0.75;
 
       // Enforce Landscape-Only: never CSS-rotate #canvas-board-overlay sideways
       if (canvasBoard) {
         canvasBoard.classList.remove('portrait-mode');
-        if (canvasBoard.width !== vw) canvasBoard.width = vw;
-        if (canvasBoard.height !== vh) canvasBoard.height = vh;
+        if (canvasBoard.width !== backW) canvasBoard.width = backW;
+        if (canvasBoard.height !== backH) canvasBoard.height = backH;
       }
       if (canvasWarp) {
-        const ww = Math.round(vw * warpScale);
-        const wh = Math.round(vh * warpScale);
+        const ww = Math.round(cssW * warpScale);
+        const wh = Math.round(cssH * warpScale);
         if (canvasWarp.width !== ww) canvasWarp.width = ww;
         if (canvasWarp.height !== wh) canvasWarp.height = wh;
       }
@@ -226,7 +221,14 @@
 
       if (this.engine) {
         this.engine.isPortrait = false;
-        this.engine.resize(vw, vh);
+        this.engine.dpr = dpr;
+        this.engine.stageScale = stageScale;
+        this._syncing = true;
+        try {
+          this.engine.resize(virtualW, virtualH);
+        } finally {
+          this._syncing = false;
+        }
       }
     }
 
@@ -234,89 +236,37 @@
       const engine = this.engine;
       if (!engine || !engine.initialized) return;
 
-      const vw = Math.max(240, w || global.innerWidth || 1280);
-      const vh = Math.max(180, h || global.innerHeight || 720);
-      const isDesktop = vw >= 1200 && vh >= 720;
-      this.viewportClass = (vh > vw) ? 'portrait-locked' : (isDesktop ? 'desktop' : 'compact-landscape');
+      const vw = Math.max(VIRTUAL_BASE_W, w || this.virtualWidth || VIRTUAL_BASE_W);
+      const vh = Math.max(VIRTUAL_BASE_H, h || this.virtualHeight || VIRTUAL_BASE_H);
+      const isDesktop = (this.cssWidth >= VIRTUAL_BASE_W && this.cssHeight >= VIRTUAL_BASE_H);
+      this.viewportClass = this.isPortrait ? 'portrait-locked' : (isDesktop ? 'desktop' : 'compact-landscape');
 
-      if (isDesktop) {
-        this.sidebarScale = 1.0;
-        this.podScale = 1.0;
-        this.overlayScale = 1.0;
-        if (engine.leftSidebar) engine.leftSidebar.scale = 1.0;
-        if (engine.rightSidebar) engine.rightSidebar.scale = 1.0;
-        if (engine.topPod) engine.topPod.scale = 1.0;
-        if (engine.bottomPod) engine.bottomPod.scale = 1.0;
-        if (engine.studioOverlay && !engine.studioOverlay.animating && engine.studioOverlay.id !== 'hub-core-stage') {
-          engine.studioOverlay.scale = 1.0;
-        }
-        engine.root?.updateTransforms();
-        return;
+      // Single Universal Virtual Anchor: every HUD child lives at 1.0 scale in (virtualW x virtualH)
+      const rootScale = (this.dpr || 1.0) * (this.stageScale || 1.0);
+      this.sidebarScale = 1.0;
+      this.podScale = 1.0;
+      this.overlayScale = 1.0;
+
+      if (engine.root) {
+        engine.root.position.x = 0;
+        engine.root.position.y = 0;
+        engine.root.scale = rootScale;
       }
+      if (engine.leftSidebar) engine.leftSidebar.scale = 1.0;
+      if (engine.rightSidebar) engine.rightSidebar.scale = 1.0;
+      if (engine.boardFrame) engine.boardFrame.scale = 1.0;
+      if (engine.topPod) engine.topPod.scale = 1.0;
+      if (engine.bottomPod) engine.bottomPod.scale = 1.0;
 
-      // Compact / Phone Landscape: keep 6-button sidebar lists (~804px local height) fitting cleanly
-      const s = Math.max(0.28, Math.min(1.0, vw / 1400, vh / 860));
-      this.sidebarScale = s;
-
-      const localSidebarW = 240;
-      const localApexH = 32;
-      const localSidebarH = Math.max(120, Math.round(vh / s) - 2 * localApexH);
-      const sidebarScreenW = Math.round(localSidebarW * s);
-      const gapX = Math.max(2, Math.round(5 * s));
-      const scrollGapY = Math.max(8, Math.round(28 * s));
-
-      if (engine.leftSidebar) {
-        engine.leftSidebar.scale = s;
-        engine.leftSidebar.position.x = sidebarScreenW * 0.5;
-        engine.leftSidebar.position.y = vh * 0.5;
-        engine.leftSidebar.setDimensions(localSidebarW, localSidebarH, localApexH, 'pointy');
-      }
-      if (engine.rightSidebar) {
-        engine.rightSidebar.scale = s;
-        engine.rightSidebar.position.x = vw - sidebarScreenW * 0.5;
-        engine.rightSidebar.position.y = vh * 0.5;
-        engine.rightSidebar.setDimensions(localSidebarW, localSidebarH, localApexH, 'pointy');
-      }
-
-      const boardApertureW = Math.max(180, vw - 2 * (sidebarScreenW + gapX));
-      const boardApertureH = Math.max(120, vh - 2 * scrollGapY);
-      if (engine.boardFrame) {
-        engine.boardFrame.position.x = vw * 0.5;
-        engine.boardFrame.position.y = vh * 0.5;
-        engine.boardFrame.setDimensions(boardApertureW, boardApertureH, 0, 'flat');
-      }
-
-      // Scale Top & Bottom HUD Stat Pods to fit cleanly inside boardApertureW without touching sidebars
-      const topCfg = global.NativeStatPod?.config || {};
-      const topFullW = (topCfg.topPodWidth || 1354) + 2 * (topCfg.podApex || 22);
-      const botFullW = (topCfg.botPodWidth || 872) + 2 * (topCfg.podApex || 22);
-      const topScale = Math.max(0.28, Math.min(1.0, s * 1.12, (boardApertureW - 12) / topFullW));
-      const botScale = Math.max(0.28, Math.min(1.0, s * 1.12, (boardApertureW - 12) / botFullW));
-      this.podScale = Math.min(topScale, botScale);
-
-      if (engine.topPod) {
-        engine.topPod.scale = topScale;
-        engine.topPod.position.x = vw * 0.5;
-        engine.topPod.position.y = Math.max(18, Math.round((topCfg.podEdgeY || 42) * topScale));
-      }
-      if (engine.bottomPod) {
-        engine.bottomPod.scale = botScale;
-        engine.bottomPod.position.x = vw * 0.5;
-        engine.bottomPod.position.y = vh - Math.max(18, Math.round((topCfg.podEdgeY || 42) * botScale));
-      }
-
-      // Scale non-Hub overlays cleanly inside the compact landscape viewport
       const overlay = engine.studioOverlay;
-      if (overlay && overlay.id !== 'hub-core-stage' && overlay.id !== 'turn-confirm-scrim' && overlay.id !== 'turn-confirm-frame') {
+      if (overlay && overlay.id !== 'hub-core-stage' && overlay.id !== 'turn-confirm-scrim') {
         if (!overlay.isCustomSized) {
           overlay.setDimensions(960, 800, 220, 'flat');
         }
-        const ovScale = this.getOverlayTargetScale(overlay);
-        this.overlayScale = ovScale;
         if (!overlay.animating) {
-          overlay.scale = ovScale;
-          overlay.position.x = vw * 0.5 + (overlay.offsetX || 0) * ovScale;
-          overlay.position.y = vh * 0.5 + (overlay.offsetY || 0) * ovScale;
+          overlay.scale = 1.0;
+          overlay.position.x = vw * 0.5 + (overlay.offsetX || 0);
+          overlay.position.y = vh * 0.5 + (overlay.offsetY || 0);
           if (typeof overlay.onResize === 'function') {
             overlay.onResize(overlay.dimensions.wBase, overlay.dimensions.hBase);
           }

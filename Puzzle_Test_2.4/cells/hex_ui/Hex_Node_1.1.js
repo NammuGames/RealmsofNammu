@@ -52,7 +52,8 @@
     if (this.parent && this.children.length === 0 && !this.clipContent) {
       const wx = this.worldMatrix[4];
       const wy = this.worldMatrix[5];
-      const maxExtent = (this.dimensions.wBase * 0.5 + this.dimensions.apex + 40);
+      const wScale = Math.max(0.25, Math.hypot(this.worldMatrix[0], this.worldMatrix[1]));
+      const maxExtent = (this.dimensions.wBase * 0.5 + this.dimensions.apex + 40) * wScale;
       const cw = ctx.canvas?.width || 2500;
       const ch = ctx.canvas?.height || 2500;
       if (wx + maxExtent < 0 || wx - maxExtent > cw || wy + maxExtent < 0 || wy - maxExtent > ch) {

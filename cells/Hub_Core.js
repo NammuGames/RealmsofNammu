@@ -390,48 +390,15 @@
       this.crownProgress = 1.0; this.ribbonProgress = 1.0;
       this.branchNodes.forEach((b) => { b.scale = 1.0; b.alpha = 1.0; });
       this._applyPositions();
-      this.stage = 'launching';
+      this.stage = 'preview_popup';
       global.AudioSynth?.playConfirm?.();
 
-      const setBtnLocked = (n, locked) => { const b = n?.getTrait?.('button'); if (b) b.disabled = locked; };
-      setBtnLocked(this.rootNode, true);
-      this.branchNodes.forEach(n => setBtnLocked(n, true));
-
-      const puzzleTxt = this.branchNodes[1]?.getTrait?.('text');
-      if (puzzleTxt) puzzleTxt.subtitle = 'Loading...';
-
-      const tweens = global.TweenOrchestrator;
-      const beatMs = (global.H_TIMING?.BEAT_SEC || 0.302718) * 1000;
-      const runLaunch = async () => {
-        const loader = this.ctx?.loader || global.HubGameLoader;
-        const ok = loader ? await loader.launchGame('puzzle', {
-          onProgress: (done, total) => {
-            if (puzzleTxt) puzzleTxt.subtitle = `Loading ${Math.round((done / Math.max(1, total)) * 100)}%`;
-          },
-          onBeforeMount: () => new Promise((res) => {
-            if (puzzleTxt) puzzleTxt.subtitle = '';
-            if (!tweens?.add) { this.unmount(); res(); return; }
-            tweens.add({
-              id: 'hub_fade_out', from: 1.0, to: 0.0, duration: Math.round(beatMs * 1.5), easing: 'easeInOutQuad',
-              onUpdate: (val) => {
-                this.uiAlpha = val;
-                if (this.rootNode) this.rootNode.alpha = val;
-                this.branchNodes.forEach((b) => { b.alpha = val; });
-              },
-              onComplete: () => { this.uiAlpha = 0.0; this.unmount(); res(); }
-            });
-          })
-        }) : false;
-
-        if (!ok) {
-          this.mount(this.ctx, { skipIntro: true });
-          const txt = this.branchNodes[1]?.getTrait?.('text');
-          if (txt) txt.subtitle = 'Tap To Retry';
-          setBtnLocked(this.branchNodes[1], false);
-        }
-      };
-
-      runLaunch();
+      if (global.HubLaunchStaging?.startPuzzleSequence) {
+        global.HubLaunchStaging.startPuzzleSequence(this, this.branchNodes[1]);
+        return;
+      }
+      this.unmount();
+      this.ctx?.loader?.launchGame?.('puzzle');
     }
 
     _renderStageBackdrop(ctx) {

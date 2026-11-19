@@ -24,7 +24,10 @@
     const targetX = options.targetX ?? (isSubFrame ? 0 : (viewW * 0.5 + (containerNode.offsetX || 0)));
     const targetY = options.targetY ?? (isSubFrame ? 0 : (viewH * 0.5 + (containerNode.offsetY || 0)));
     const inPlace = origin === 'self' || options.inPlace;
-    const screenOrigin = inPlace ? { x: targetX, y: targetY } : this.getOriginPoint(origin, isSubFrame ? (viewW * 0.5) : targetX, isSubFrame ? (viewH * 0.5) : targetY);
+    const pm = containerNode.parent?.worldMatrix;
+    const defScreenX = pm ? (pm[0] * targetX + pm[2] * targetY + pm[4]) : targetX;
+    const defScreenY = pm ? (pm[1] * targetX + pm[3] * targetY + pm[5]) : targetY;
+    const screenOrigin = inPlace ? { x: targetX, y: targetY } : this.getOriginPoint(origin, defScreenX, defScreenY);
 
     let localOrigin = screenOrigin;
     if (!inPlace && containerNode.parent && typeof containerNode.parent.screenToLocal === 'function') {
@@ -127,7 +130,10 @@
     const targetY = options.targetY ?? (isSubFrame ? 0 : (viewH * 0.5 + (containerNode.offsetY || 0)));
     const effectiveOrigin = (typeof options.getOrigin === 'function') ? options.getOrigin() : origin;
     const inPlace = effectiveOrigin === 'self' || options.inPlace;
-    const screenOrigin = inPlace ? { x: targetX, y: targetY } : this.getOriginPoint(effectiveOrigin, isSubFrame ? (viewW * 0.5) : targetX, isSubFrame ? (viewH * 0.5) : targetY);
+    const pm = containerNode.parent?.worldMatrix;
+    const defScreenX = pm ? (pm[0] * targetX + pm[2] * targetY + pm[4]) : targetX;
+    const defScreenY = pm ? (pm[1] * targetX + pm[3] * targetY + pm[5]) : targetY;
+    const screenOrigin = inPlace ? { x: targetX, y: targetY } : this.getOriginPoint(effectiveOrigin, defScreenX, defScreenY);
 
     let localOrigin = screenOrigin;
     if (!inPlace && containerNode.parent && typeof containerNode.parent.screenToLocal === 'function') {

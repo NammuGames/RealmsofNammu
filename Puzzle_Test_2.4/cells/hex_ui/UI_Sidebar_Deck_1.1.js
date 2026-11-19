@@ -197,6 +197,9 @@
     [this.colControls, this.colSpellbook, this.colMaterials, this.colComponents].forEach((c, idx) => {
       if (c) c.visible = (idx === this.state.rightSidebarActiveCol) || (Math.abs(c.position.x) < cull);
     });
+    this.spellList?.update?.();
+    this.materialsList?.update?.();
+    this.componentsList?.update?.();
   };
 
   Proto.updateVisibleButtonCount = function(count) {

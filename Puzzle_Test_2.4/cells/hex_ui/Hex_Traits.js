@@ -292,14 +292,29 @@
       this.node._dirtyGeometry = true;
     }
 
-    handleWheel(deltaY) {
-      if (!this.allowManualScroll || !this.node) return;
+    getMaxScroll() {
+      if (!this.node) return 0;
       const count = this.node.children.filter(c => c.visible !== false).length;
-      if (count <= this.capacity) return; // No scroll needed when balanced
-
+      if (count <= this.capacity) return 0;
       const step = this.slotHeight + this.spacing;
-      const maxScroll = Math.max(0, (count - this.capacity) * step);
-      this.targetScrollOffset = Math.max(-maxScroll, Math.min(0, this.targetScrollOffset - deltaY * 0.6));
+      return Math.max(0, (count - this.capacity) * step);
+    }
+
+    scrollBy(deltaLocalY, immediate = false) {
+      if (!this.allowManualScroll || !this.node) return false;
+      const maxScroll = (typeof this.getMaxScroll === 'function') ? this.getMaxScroll() : 0;
+      if (maxScroll <= 0) return false;
+      const next = Math.max(-maxScroll, Math.min(0, this.targetScrollOffset + deltaLocalY));
+      this.targetScrollOffset = next;
+      if (immediate) {
+        this.scrollOffset = next;
+        this.layoutChildren();
+      }
+      return true;
+    }
+
+    handleWheel(deltaY) {
+      this.scrollBy(-deltaY * 0.6, false);
     }
 
     update() {

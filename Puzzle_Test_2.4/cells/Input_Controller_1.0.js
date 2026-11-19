@@ -114,6 +114,16 @@
         this.mouseDownY = t.clientY ?? 0;
       }, { passive: true });
 
+      canvas.addEventListener('touchmove', (e) => {
+        if (!this.isMouseDown) return;
+        const t = e.touches[0];
+        if (!t) return;
+        const dist = Math.hypot((t.clientX ?? 0) - this.mouseDownX, (t.clientY ?? 0) - this.mouseDownY);
+        if (dist > this.dragThreshold) {
+          this.hasDragged = true;
+        }
+      }, { passive: true });
+
       // 3. Window Mouse & Touch Up: Detect clicks vs pans on board
       window.addEventListener('mouseup', (e) => {
         if (!this.isMouseDown) return;

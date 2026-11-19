@@ -62,6 +62,10 @@
       this.close(true);
       return;
     }
+    if (this.mode === 'singleText') {
+      this.close(true);
+      return;
+    }
     this.finalizeNameInput();
     this.finalizeTagInput();
     const candTag = this.getCurrentCandidateTag();
@@ -204,6 +208,7 @@
     if (!HexNode || !traits) return null;
 
     const isRoomMode = (this.mode === 'roomCode');
+    const isSingleText = (this.mode === 'singleText');
     const handleRoomTap = () => {
       const code = String(self.targetItem?.name || '').replace(/[^A-Za-z0-9]/g, '');
       if (code.length >= 4) {
@@ -228,6 +233,7 @@
       hoverOutline: false, soundClick: false,
       onClick: () => {
         if (isRoomMode) { handleRoomTap(); return; }
+        if (isSingleText) { self.confirm(); return; }
         self.finalizeTagInput();
         self.activeField = null;
         self.triggerRender();
@@ -257,6 +263,7 @@
       pod.addTrait(new traits.ButtonTrait({
         onClick: () => {
           if (isRoomMode) { handleRoomTap(); return; }
+          if (isSingleText) { self._focusMobileInput?.(); return; }
           if (self.activeField === 'tag' && fieldKey !== 'tag') {
             self.finalizeTagInput();
           }
@@ -297,6 +304,9 @@
       const readyAct = curLen >= 4 ? '#4ade80' : '#38bdf8';
       frame.addChild(makeSubPod('rename-sub-top', rowY - ySpacing, topW, '#953ffd', '#953ffd', null, () => 'Enter Room Code'));
       frame.addChild(makeSubPod('rename-sub-btm', rowY + ySpacing, Math.max(bottomW, 240), readyCol, readyAct, 'code', () => this.targetItem.name || ''));
+    } else if (isSingleText) {
+      frame.addChild(makeSubPod('rename-sub-top', rowY - ySpacing, topW, '#953ffd', '#953ffd', null, () => this._singleTitle || 'Enter Name'));
+      frame.addChild(makeSubPod('rename-sub-btm', rowY + ySpacing, topW, '#3d6eff', '#38bdf8', 'name', () => this.targetItem.name || ''));
     } else {
       // Top Row Sub-Pod: Preset Name (Left sub-pod of Preset Name Button, Purple #953ffd)
       frame.addChild(makeSubPod(

@@ -115,6 +115,7 @@
     'cells/hex_ui/Stat_Canvas_1.0.js',
     'cells/hex_ui/Stat_Canvas_1.1.js',
     'cells/hex_ui/Stat_Canvas.js',
+    'cells/hex_ui/Room_Stat_Canvas.js',
     'cells/hex_ui/UI_Cards_Deck_1.0.js',
     'cells/hex_ui/UI_Cards_Deck_1.1.js',
     'cells/hex_ui/UI_Button_Sprites.js',
@@ -208,6 +209,7 @@
         if (global.SigilNookCanvas) global.SigilNookCanvas.init(engine);
         if (statPod) statPod.init(engine);
         if (global.StatCanvas) global.StatCanvas.init(engine);
+        if (global.RoomStatCanvas) global.RoomStatCanvas.init(engine);
         if (deckSync) deckSync.initBridge();
         if (sidebarDeck) sidebarDeck.init(engine, state, audio);
         if (deckSync) deckSync.syncNativeStatPodWithGameState();
@@ -279,6 +281,7 @@
 
       if (global.GameSettingsCanvas?.isOpen?.()) global.GameSettingsCanvas.close();
       if (global.StatCanvas?.isOpen?.()) global.StatCanvas.close();
+      if (global.RoomStatCanvas?.isOpen?.()) global.RoomStatCanvas.close({ returnToMenu: false, immediate: true, silent: true });
       if (global.SigilNookCanvas?.isOpen?.()) global.SigilNookCanvas.close();
       if (global.TurnConfirmPopup?.isOpen?.()) global.TurnConfirmPopup.close();
 

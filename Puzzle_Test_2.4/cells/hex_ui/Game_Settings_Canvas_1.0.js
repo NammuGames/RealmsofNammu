@@ -145,7 +145,7 @@
     }
 
     _hasOtherOverlayOpen() {
-      return !!(global.StatCanvas?.isOpen?.() || global.SigilNookCanvas?.isOpen?.() || global.SigilEmblemStudio?.isOpen?.() || global.TurnConfirmPopup?.isOpen?.());
+      return !!(global.StatCanvas?.isOpen?.() || global.RoomStatCanvas?.isOpen?.() || global.SigilNookCanvas?.isOpen?.() || global.SigilEmblemStudio?.isOpen?.() || global.TurnConfirmPopup?.isOpen?.());
     }
 
     isOpen() { return this.active || this.isAnimating(); }

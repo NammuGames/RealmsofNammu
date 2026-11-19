@@ -29,14 +29,13 @@
     }
 
     _focusMobileInput() {
-      if (typeof document === 'undefined' || this.mode !== 'roomCode') return;
+      if (typeof document === 'undefined' || (this.mode !== 'roomCode' && this.mode !== 'singleText')) return;
       let inp = this._mobileInput || document.getElementById('nammu-room-code-input');
       if (!inp) {
         inp = document.createElement('input');
         inp.id = 'nammu-room-code-input';
         inp.type = 'text';
         inp.autocomplete = 'off';
-        inp.autocapitalize = 'characters';
         inp.spellcheck = false;
         inp.setAttribute('enterkeyhint', 'done');
         Object.assign(inp.style, {
@@ -47,11 +46,15 @@
         document.body.appendChild(inp);
       }
       this._mobileInput = inp;
-      inp.maxLength = 4;
-      inp.value = (this.targetItem?.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+      const isRoom = (this.mode === 'roomCode');
+      const maxLen = isRoom ? 4 : (this._singleMaxLen || 18);
+      inp.maxLength = maxLen;
+      inp.autocapitalize = isRoom ? 'characters' : 'words';
+      const cleanVal = (v) => isRoom ? v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) : v.slice(0, maxLen);
+      inp.value = cleanVal(this.targetItem?.name || '');
       inp.oninput = () => {
-        if (!this.active || this.mode !== 'roomCode' || !this.targetItem) return;
-        const clean = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+        if (!this.active || (this.mode !== 'roomCode' && this.mode !== 'singleText') || !this.targetItem) return;
+        const clean = cleanVal(inp.value);
         inp.value = clean;
         if (this.targetItem.name !== clean) {
           this.targetItem.name = clean;
@@ -60,7 +63,7 @@
         }
       };
       inp.onkeydown = (e) => {
-        if (!this.active || this.mode !== 'roomCode') return;
+        if (!this.active || (this.mode !== 'roomCode' && this.mode !== 'singleText')) return;
         if (e.key === 'Enter') { e.preventDefault(); this.confirm(); }
         else if (e.key === 'Escape') { e.preventDefault(); this.cancel(); }
       };
@@ -76,6 +79,14 @@
     openRoomCode(initialCode = '', onConfirm = null, options = {}) {
       const cleaned = String(initialCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
       return this.open({ name: cleaned, tagNumber: '' }, 'Room Code', 1, onConfirm, null, { ...options, mode: 'roomCode' });
+    }
+
+    openSingleText(opts = {}) {
+      this._singleTitle = opts.title || 'Enter Name';
+      this._singlePlaceholder = opts.placeholder || 'Name';
+      this._singleMaxLen = opts.maxLength || 18;
+      const init = String(opts.initialValue || '').slice(0, this._singleMaxLen);
+      return this.open({ name: init, tagNumber: '' }, this._singleTitle, 1, opts.onConfirm, null, { ...opts, mode: 'singleText' });
     }
 
     setConfig(updates) {
@@ -175,7 +186,7 @@
     open(targetItem, categoryLabel = 'Preset', defaultNum = 1, onDone = null, presetList = null, options = {}) {
       if (this.isOpen()) return;
       this.active = true;
-      this.mode = options?.mode === 'roomCode' ? 'roomCode' : 'rename';
+      this.mode = (options?.mode === 'roomCode' || options?.mode === 'singleText') ? options.mode : 'rename';
       this.targetItem = (typeof targetItem === 'object' && targetItem) ? targetItem : { name: String(targetItem || 'Preset') };
       this.initialName = this.targetItem.name;
       this.initialTagNumber = this.targetItem.tagNumber;
@@ -188,7 +199,7 @@
       this.isAddNew = !!(options && (options.isAddNew || options.isNew));
       this.originNode = options?.originNode || options?.originNodeOrId || global.HexUIEngine?.lastClickedNode;
 
-      if (this.mode !== 'roomCode' && !this.targetItem.tagNumber) {
+      if (this.mode === 'rename' && !this.targetItem.tagNumber) {
         this.targetItem.tagNumber = String(defaultNum).padStart(3, '0');
       }
 
@@ -200,7 +211,7 @@
       }, 450);
 
       this.bindKeyboard();
-      if (this.mode === 'roomCode') this._focusMobileInput();
+      if (this.mode === 'roomCode' || this.mode === 'singleText') this._focusMobileInput();
       if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
       global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
       this.triggerRender();
@@ -256,7 +267,8 @@
     close(force = false) {
       if (!this.active || (!force && this.frameNode?.animating)) return;
       const isRoomMode = (this.mode === 'roomCode');
-      if (!force && !isRoomMode) {
+      const isSingleText = (this.mode === 'singleText');
+      if (!force && !isRoomMode && !isSingleText) {
         const candNum = parseInt(this.getCurrentCandidateTag(), 10);
         if (this.isDefaultSlot(candNum)) {
           if (global.AudioSynth?.playDetonateChime) global.AudioSynth.playDetonateChime(1);
@@ -272,6 +284,8 @@
       }
       if (isRoomMode) {
         this.targetItem.name = String(this.targetItem?.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+      } else if (isSingleText) {
+        this.targetItem.name = (this.targetItem?.name || '').trim() || this._singlePlaceholder || 'Match 001';
       } else {
         this.finalizeNameInput();
         this.finalizeTagInput();
@@ -288,7 +302,7 @@
       if (this.isAddNew && global.GameSettingsCanvas) {
         global.GameSettingsCanvas._skipColumnAnimation = true;
       }
-      if (typeof this.onDoneCallback === 'function') this.onDoneCallback(isRoomMode ? this.targetItem?.name : undefined);
+      if (typeof this.onDoneCallback === 'function') this.onDoneCallback((isRoomMode || isSingleText) ? this.targetItem?.name : undefined);
 
       const onDone = () => this._cleanupFrame();
 

@@ -355,14 +355,22 @@
     const l = curPreset.luck || (this.config.luckPresets ? (this.config.luckPresets[this.config.activeLuckPresetIndex] || this.config.luckPresets[0]) : {});
     const b = curPreset.blight || (this.config.blightPresets ? (this.config.blightPresets[this.config.activeBlightPresetIndex] || this.config.blightPresets[0]) : {});
 
+    const seats = (net?.role === 'host' && net.getRoomSeats) ? net.getRoomSeats() : [];
+    if (net?.role === 'host' && seats.length > 6) {
+      global.AudioSynth?.playCancel?.();
+      global.GameState?.showToast?.('⚠️ Max 6 players allowed! Reduce local player count in Players.');
+      return;
+    }
+
     const isOnline = !!(net?.isConnected?.() || this.config.lobbyMode === 'Online');
+    const totalPlayers = (net?.role === 'host' && seats.length > 0) ? seats.length : this.config.playerCount;
     const roomCode = net?.roomCode || (this.getPendingRoomCode ? this.getPendingRoomCode() : (mc?.generateUniqueRoomCode?.() || '4K9P'));
-    const matchName = this.getPendingMatchName ? this.getPendingMatchName() : `Match ${roomCode}`;
+    const matchName = (net?.role === 'host' && net.matchName) ? net.matchName : (this.getPendingMatchName ? this.getPendingMatchName() : `Match ${roomCode}`);
     const roleBadge = isOnline ? 'Host' : 'Player';
     const lobbyMode = isOnline ? 'Online' : 'Local';
 
     const matchConfig = {
-      playerCount: this.config.playerCount,
+      playerCount: totalPlayers,
       presetName: curPreset.name || 'Meditate',
       matchName,
       roomCode,
@@ -385,7 +393,7 @@
 
     this.close(async () => {
       if (isOnline && net && net.role !== 'host') {
-        try { await net.hostRoom(roomCode, { matchName }); } catch {}
+        try { await net.hostRoom(roomCode, { matchName, localPlayerCount: this.config.playerCount }); } catch {}
       }
       if (global.GameState) {
         global.GameState.matchName = matchName;
@@ -400,7 +408,7 @@
           mc?.saveActivePuzzleMatch?.(mc.activeMatchId, { matchName, roomCode, roleBadge, lobbyMode });
         }
       }, 1700);
-      global.GameState?.showToast?.(`✦ ${matchName} • ${this.config.playerCount} Player(s) • Radius-${m.boardRadius ?? 6}`);
+      global.GameState?.showToast?.(`✦ ${matchName} • ${totalPlayers} Player(s) • Radius-${m.boardRadius ?? 6}`);
     });
   };
 })(window);

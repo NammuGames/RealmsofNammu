@@ -79,7 +79,46 @@
     inp.focus();
   };
 
-  // ── 1. LOBBY COLUMN (LOCAL/ONLINE, PLAYERS, MATCH NAME, HOST, JOIN) ───────
+  // ── 1. PLAYERS / LOBBY COLUMN (LOCAL PLAYERS, MATCH NAME, HOST, JOIN) ─────
+  Proto._startHostRoomStatCanvas = function(originId = 'pod-base-mp-host') {
+    const net = global.NetworkP2PManager;
+    if (!net) { global.GameState?.showToast?.('⚠️ Online P2P only active inside Nammu Hub.'); return; }
+    const roomCode = this.getPendingRoomCode();
+    const matchName = this.getPendingMatchName();
+    this.config.lobbyMode = 'Online';
+    net.hostRoom(roomCode, { matchName, localPlayerCount: this.config.playerCount }).then((res) => {
+      if (res?.roomCode) this.config.pendingRoomCode = res.roomCode;
+    }).catch(() => {});
+    if (global.RoomStatCanvas?.open) {
+      global.RoomStatCanvas.open({ origin: originId });
+    }
+  };
+
+  Proto._startGuestSearchingCanvas = function(code, originId = 'pod-base-mp-join') {
+    const net = global.NetworkP2PManager;
+    if (!net) { global.GameState?.showToast?.('⚠️ Online P2P only active inside Nammu Hub.'); return; }
+    const cleanCode = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+    if (cleanCode.length < 4) return;
+    this._joinRoomCode = cleanCode;
+    this.config.lobbyMode = 'Online';
+
+    net.joinRoom(cleanCode, { keepSearching: true, localPlayerCount: this.config.playerCount }).then((res) => {
+      if (res?.ok) {
+        global.MemoryCardManager?.saveJoinedLobbyMatch?.({
+          roomCode: net.roomCode || cleanCode,
+          matchName: net.matchName,
+          presetName: net.hostPresetName,
+          playerCount: net.hostPlayerCount,
+          matchConfig: net.hostMatchConfig
+        });
+      }
+    }).catch(() => {});
+
+    if (global.RoomStatCanvas?.open) {
+      global.RoomStatCanvas.open({ origin: originId });
+    }
+  };
+
   Proto.renderMultiplayerColumn = function() {
     const self = this;
     const armed = this.getArmedSavedMatch ? this.getArmedSavedMatch() : null;
@@ -120,237 +159,124 @@
 
       if (lMode === 'Online' || armed.roleBadge === 'Host') {
         items.push({
-          type: 'base', id: 'mp-host', title: 'Host', color: '#10f000',
-          onClick: () => self.pushColumn('Host', () => self.renderHostRoomColumn())
+          type: 'base', id: 'mp-host', title: 'Host Room', color: '#10f000',
+          onClick: () => {
+            if (!net) { global.GameState?.showToast?.('⚠️ Online P2P only active inside Nammu Hub.'); return; }
+            net.hostRoom(armed.roomCode || null, { matchName: armed.matchName, localPlayerCount: armed.playerCount || 1 }).catch(() => {});
+            global.RoomStatCanvas?.open?.({ origin: 'pod-base-mp-host' });
+          }
         });
       }
-      items.push({
-        type: 'base', id: 'mp-join', title: 'Join', color: '#3d6eff',
-        onClick: () => {
-          if (armed.roomCode) self._joinRoomCode = armed.roomCode;
-          self.pushColumn('Join', () => self.renderJoinRoomColumn());
-        }
-      });
+      if (armed.roomCode) {
+        items.push({
+          type: 'base', id: 'mp-join', title: 'Join Room', color: '#3d6eff',
+          onClick: () => self._startGuestSearchingCanvas(armed.roomCode, 'pod-base-mp-join')
+        });
+      }
 
-      this.renderColumn('Lobby (View Only)', true, items);
+      this.renderColumn('Players (View Only)', true, items);
       return;
     }
 
-    const isOnline = (net?.isConnected?.() || this.config.lobbyMode === 'Online');
-    const modeLabel = isOnline ? 'Online' : 'Local';
-    const matchName = this.getPendingMatchName();
+    const isHosting = net?.role === 'host';
+    const matchName = isHosting ? (net.matchName || this.getPendingMatchName()) : this.getPendingMatchName();
+    const items = [];
 
-    this.renderColumn('Lobby', true, [
+    if (isHosting) {
+      items.push({
+        type: 'preset_name', id: 'mp-open-room',
+        title: `Room ${net.roomCode}`, categoryIndexText: `${net.getRoomSeats?.().length || 1}/6`,
+        color: '#10f000', isDoubleBorder: true,
+        onClick: () => global.RoomStatCanvas?.open?.({ origin: 'pod-preset-mp-open-room' })
+      });
+    }
+
+    items.push(
       {
-        type: 'preset_name', id: 'lobby-mode-toggle',
-        title: modeLabel, categoryIndexText: 'Mode',
-        color: isOnline ? '#3d6eff' : '#10f000', isDoubleBorder: isOnline,
-        onClick: () => {
-          if (net?.isConnected?.()) {
-            global.GameState?.showToast?.('⚠️ Leave online room in Host/Join before switching to Local.');
-            return;
-          }
-          self.config.lobbyMode = isOnline ? 'Local' : 'Online';
+        type: 'half_stepper', id: 'players', title: 'Local Players', color: '#10f000',
+        valText: `${this.config.playerCount} Local Player${this.config.playerCount > 1 ? 's' : ''}`,
+        onDelta: (d) => {
+          self.config.playerCount = Math.max(1, Math.min(6, self.config.playerCount + d));
+          if (isHosting) net.setLocalPlayerCount?.(self.config.playerCount);
           self.buildScene();
         }
       },
       {
-        type: 'half_stepper', id: 'players', title: 'Local Players', color: '#10f000',
-        valText: `${this.config.playerCount} Local Player${this.config.playerCount > 1 ? 's' : ''}`,
-        onDelta: (d) => { self.config.playerCount = Math.max(1, Math.min(6, self.config.playerCount + d)); self.buildScene(); }
-      },
-      {
         type: 'preset_name', id: 'lobby-match-name',
         title: matchName, categoryIndexText: 'Match Name', color: '#3d6eff',
-        onClick: () => self._focusHiddenInput({
-          maxLength: 18,
-          initialValue: self.getPendingMatchName(),
-          onChange: (val) => { self.config.pendingMatchName = val || 'Match 001'; }
-        })
-      },
-      {
-        type: 'base', id: 'mp-host', title: 'Host', color: '#10f000',
         onClick: () => {
-          self.config.lobbyMode = 'Online';
-          self.pushColumn('Host', () => self.renderHostRoomColumn());
-        }
-      },
-      {
-        type: 'base', id: 'mp-join', title: 'Join', color: '#3d6eff',
-        onClick: () => {
-          self.config.lobbyMode = 'Online';
-          self.pushColumn('Join', () => self.renderJoinRoomColumn());
-        }
-      }
-    ]);
-  };
-
-  // ── 2. HOST & JOIN SUB-PAGES ──────────────────────────────────────────────
-  Proto.renderHostRoomColumn = function() {
-    const self = this;
-    const net = global.NetworkP2PManager;
-    const armed = this.getArmedSavedMatch ? this.getArmedSavedMatch() : null;
-    const isHosting = net?.role === 'host';
-    const peersCount = net?.connections?.size || 0;
-    const roomCode = armed?.roomCode || this.getPendingRoomCode();
-    const matchName = armed?.matchName || this.getPendingMatchName();
-
-    this.renderColumn('Host', true, [
-      {
-        type: 'preset_name', id: 'host-match-label',
-        title: isHosting ? (net.matchName || matchName) : matchName,
-        categoryIndexText: `Code ${isHosting ? net.roomCode : roomCode}`,
-        color: isHosting ? '#10f000' : '#3d6eff',
-        isDoubleBorder: isHosting,
-        onClick: () => {
-          const codeToCopy = isHosting ? net.roomCode : roomCode;
-          if (global.navigator?.clipboard?.writeText) {
-            global.navigator.clipboard.writeText(codeToCopy);
-            global.GameState?.showToast?.(`📋 Copied Room Code: ${codeToCopy}`);
-          }
-        }
-      },
-      {
-        type: 'preset_name', id: 'host-peers-badge',
-        title: isHosting ? `${peersCount} Guest(s) Online` : 'Room Closed',
-        categoryIndexText: isHosting ? 'Hosting' : 'Standby',
-        color: isHosting ? '#10f000' : '#953ffd',
-        onClick: () => {}
-      },
-      {
-        type: 'base', id: 'host-start-room',
-        title: isHosting ? 'Close Room' : 'Open Host Room',
-        color: isHosting ? '#ff3333' : '#10f000',
-        onClick: () => {
-          if (!net) { global.GameState?.showToast?.('⚠️ Online P2P only active inside Nammu Hub.'); return; }
-          if (isHosting) {
-            net.leaveRoom().then(() => self.rebuildTopFrame());
+          if (global.GameSettingsRenamePopup?.openSingleText) {
+            global.GameSettingsRenamePopup.openSingleText({
+              title: 'Enter Match Name',
+              initialValue: matchName,
+              placeholder: 'Match 001',
+              maxLength: 18,
+              originNode: 'pod-preset-lobby-match-name',
+              onConfirm: (val) => {
+                self.config.pendingMatchName = val || 'Match 001';
+                if (isHosting) {
+                  net.matchName = self.config.pendingMatchName;
+                  net._broadcastRoster?.();
+                }
+                self.rebuildTopFrame();
+              }
+            });
           } else {
-            net.hostRoom(roomCode, { matchName }).then(() => self.rebuildTopFrame()).catch(() => {});
+            self._focusHiddenInput({
+              maxLength: 18,
+              initialValue: matchName,
+              onChange: (val) => { self.config.pendingMatchName = val || 'Match 001'; }
+            });
           }
         }
       }
-    ]);
-  };
+    );
 
-  Proto._connectWithRoomCode = function(rawCode) {
-    const net = global.NetworkP2PManager;
-    if (!net) {
-      global.GameState?.showToast?.('⚠️ Online P2P only active inside Nammu Hub.');
-      return Promise.resolve(false);
-    }
-    const code = String(rawCode || this._joinRoomCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-    if (code.length < 4) {
-      global.GameState?.showToast?.('⚠️ Enter a 4-character Room Code.');
-      return Promise.resolve(false);
-    }
-    if (this._joiningRoom) return Promise.resolve(false);
-    this._joinRoomCode = code;
-    this._joiningRoom = true;
-    global.GameState?.showToast?.(`🔄 Connecting to Room ${code}...`);
-    this.rebuildTopFrame();
-
-    return net.joinRoom(code).then((res) => {
-      this._joiningRoom = false;
-      if (!res || !res.ok) {
-        this.rebuildTopFrame();
-        return false;
-      }
-      this.config.lobbyMode = 'Online';
-      global.MemoryCardManager?.saveJoinedLobbyMatch?.({
-        roomCode: net.roomCode || code,
-        matchName: net.matchName,
-        presetName: net.hostPresetName,
-        playerCount: net.hostPlayerCount,
-        matchConfig: net.hostMatchConfig
-      });
-      if (typeof this.popToRoot === 'function') this.popToRoot();
-      else this.rebuildTopFrame();
-      return true;
-    }).catch((err) => {
-      this._joiningRoom = false;
-      if (!err?._toasted) {
-        global.GameState?.showToast?.(`⚠️ Could not join Room ${code}: ${err?.type || err?.message || 'Unavailable'}`);
-      }
-      this.rebuildTopFrame();
-      return false;
-    });
-  };
-
-  Proto.renderJoinRoomColumn = function() {
-    const self = this;
-    const net = global.NetworkP2PManager;
-    const isJoined = net?.role === 'guest';
-    const isJoining = !!this._joiningRoom;
-    const code = (this._joinRoomCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-
-    const items = [
-      {
-        type: 'preset_name', id: 'join-code-entry',
-        title: code || 'xxxx',
-        categoryIndexText: 'Room Code',
-        color: code ? '#10f000' : '#3d6eff',
-        isDoubleBorder: !!code,
-        onClick: () => {
-          if (isJoining) return;
-          if (global.GameSettingsRenamePopup?.openRoomCode) {
-            global.GameSettingsRenamePopup.openRoomCode(self._joinRoomCode || '', (enteredCode) => {
-              if (!enteredCode) return;
-              self._joinRoomCode = enteredCode;
-              self._connectWithRoomCode(enteredCode);
-            }, { originNode: 'pod-preset-join-code-entry' });
-            return;
-          }
-          self._focusHiddenInput({
-            maxLength: 4,
-            initialValue: self._joinRoomCode || '',
-            transform: (v) => v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4),
-            onChange: (val) => { self._joinRoomCode = val; },
-            onSubmit: (val) => { self._connectWithRoomCode(val); }
-          });
-        }
-      },
-      {
-        type: 'base', id: 'join-connect-btn',
-        title: isJoining ? 'Joining...' : (isJoined ? `Leave (${net.roomCode})` : 'Join Match'),
-        color: isJoined ? '#ff3333' : (isJoining ? '#953ffd' : '#10f000'),
-        onClick: () => {
-          if (isJoining) return;
-          if (!net) { global.GameState?.showToast?.('⚠️ Online P2P only active inside Nammu Hub.'); return; }
-          if (isJoined) {
-            net.leaveRoom().then(() => self.rebuildTopFrame());
-          } else if (code.length < 4 && global.GameSettingsRenamePopup?.openRoomCode) {
-            global.GameSettingsRenamePopup.openRoomCode('', (enteredCode) => {
-              if (!enteredCode) return;
-              self._joinRoomCode = enteredCode;
-              self._connectWithRoomCode(enteredCode);
-            }, { originNode: 'pod-preset-join-code-entry' });
-          } else {
-            self._connectWithRoomCode(self._joinRoomCode);
-          }
-        }
-      }
-    ];
-
-    // Quick-fill buttons for previously saved matches with stored Room Codes
-    const saves = (global.MemoryCardManager?.listSaves?.() || []).filter(s => s?.roomCode);
-    saves.slice(0, 3).forEach((s, idx) => {
+    if (isHosting) {
       items.push({
-        type: 'preset_name',
-        id: `join-saved-${idx}`,
-        title: s.matchName || 'Saved Match',
-        categoryIndexText: s.roomCode,
-        color: '#3d6eff',
+        type: 'base', id: 'mp-leave-host', title: 'Close Host Room', color: '#ff3333',
         onClick: () => {
-          self._joinRoomCode = s.roomCode;
-          global.GameState?.showToast?.(`✦ Selected Room Code ${s.roomCode}`);
-          self.rebuildTopFrame();
+          self.config.lobbyMode = 'Local';
+          net.closeRoomAndSave().then(() => self.rebuildTopFrame());
         }
       });
-    });
+    } else {
+      items.push(
+        {
+          type: 'base', id: 'mp-host', title: 'Host', color: '#10f000',
+          onClick: () => self._startHostRoomStatCanvas('pod-base-mp-host')
+        },
+        {
+          type: 'base', id: 'mp-join', title: 'Join', color: '#3d6eff',
+          onClick: () => {
+            if (!net) { global.GameState?.showToast?.('⚠️ Online P2P only active inside Nammu Hub.'); return; }
+            if (global.GameSettingsRenamePopup?.openRoomCode) {
+              global.GameSettingsRenamePopup.openRoomCode('', (enteredCode) => {
+                if (!enteredCode) return;
+                self._startGuestSearchingCanvas(enteredCode, 'pod-base-mp-join');
+              }, { originNode: 'pod-base-mp-join' });
+            }
+          }
+        }
+      );
 
-    this.renderColumn('Join', true, items);
+      // Quick-join chips for saved online matches
+      const saves = (global.MemoryCardManager?.listSaves?.() || []).filter(s => s?.roomCode);
+      saves.slice(0, 2).forEach((s, idx) => {
+        items.push({
+          type: 'preset_name', id: `join-saved-${idx}`,
+          title: s.matchName || 'Saved Match', categoryIndexText: `Join ${s.roomCode}`,
+          color: '#3d6eff',
+          onClick: () => self._startGuestSearchingCanvas(s.roomCode, `pod-preset-join-saved-${idx}`)
+        });
+      });
+    }
+
+    this.renderColumn('Players', true, items);
   };
+
+  Proto.renderHostRoomColumn = function() { this.renderMultiplayerColumn(); };
+  Proto.renderJoinRoomColumn = function() { this.renderMultiplayerColumn(); };
 
   // ── 3. READ-ONLY LEVEL SETTINGS VIEW FOR ARMED SAVED MATCHES ──────────────
   Proto.renderSavedMatchLevelView = function(save) {

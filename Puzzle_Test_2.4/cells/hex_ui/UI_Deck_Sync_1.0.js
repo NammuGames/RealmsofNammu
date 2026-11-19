@@ -50,6 +50,10 @@
   UIDeckSync.syncMaterialsTrayWithGameState = function() {
     const deck = global.UISidebarDeck;
     if (!deck?.colControls || !deck?.rightButtonNodes || deck.rightButtonNodes.length < 6) return;
+    if (global.RoomStatCanvas?.isOpen?.()) {
+      global.RoomStatCanvas.syncSidebars(deck);
+      return;
+    }
     const g = global.GameState;
     if (!g) return;
 

@@ -101,7 +101,10 @@
         { key: 'nav-down', dir: 'down', hotkey: 'S', title: '▼ DOWN', sub: '-Q (Southwest)', badge: 'KEY: S', color: '#38bdf8', action: () => this.handleNav('down') },
         { key: 'nav-left', dir: 'left', hotkey: 'A', title: '◄ LEFT', sub: 'Pure West (-X)', badge: 'KEY: A', color: '#38bdf8', action: () => this.handleNav('left') },
         { key: 'nav-right', dir: 'right', hotkey: 'D', title: 'RIGHT ►', sub: 'Pure East (+X)', badge: 'KEY: D', color: '#38bdf8', action: () => this.handleNav('right') },
-        { key: 'menu', title: 'Menu', hotkey: 'M', color: '#c084fc', isSidebarButton: true, action: () => global.CanvasHub?.toggle() }
+        { key: 'menu', title: 'Menu', hotkey: 'M', color: '#c084fc', isSidebarButton: true, action: () => {
+          if (global.RoomStatCanvas?.isOpen?.()) { global.RoomStatCanvas.onLeavePressed(); return; }
+          global.CanvasHub?.toggle();
+        } }
       ];
 
       navData.forEach(d => {
@@ -169,6 +172,9 @@
     handleUndo() {
       if (global.TurnConfirmPopup?.isOpen?.()) {
         global.TurnConfirmPopup.close();
+        return;
+      } else if (global.RoomStatCanvas?.isOpen?.()) {
+        global.RoomStatCanvas.onReturnPressed();
         return;
       } else if (global.GameSettingsCanvas?.isOpen()) {
         global.GameSettingsCanvas.goBack();
@@ -305,6 +311,11 @@
       if (global.GameSettingsRenamePopup?.isOpen?.()) {
         global.AudioSynth?.playClick?.();
         global.GameSettingsRenamePopup.confirm();
+        return;
+      }
+      if (global.RoomStatCanvas?.isOpen?.()) {
+        global.AudioSynth?.playClick?.();
+        global.RoomStatCanvas.onConfirmPressed();
         return;
       }
       if (global.StatCanvas?.isOpen?.() && global.GameState?.gameOver) {

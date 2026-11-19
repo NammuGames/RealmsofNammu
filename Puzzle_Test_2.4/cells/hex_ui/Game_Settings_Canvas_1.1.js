@@ -41,10 +41,15 @@
     const net = global.NetworkP2PManager;
     const isGuestWaiting = !!(net?.role === 'guest' && net?.isConnected?.());
 
-    const levelTitle = armedSave ? (armedSave.presetName || armedSave.matchConfig?.presetName || curPreset.name) : curPreset.name;
-    const lobbyState = armedSave
-      ? (armedSave.lobbyMode || 'Local')
-      : (net?.isConnected?.() ? 'Online' : (this.config.lobbyMode || 'Local'));
+    const levelTitle = armedSave
+      ? (armedSave.presetName || armedSave.matchConfig?.presetName || curPreset.name)
+      : (isGuestWaiting ? (net.hostPresetName || curPreset.name) : curPreset.name);
+    const isOnline = !!(net?.isConnected?.() || (armedSave && armedSave.lobbyMode === 'Online'));
+    const pCountLocal = armedSave ? (armedSave.playerCount || 1) : (this.config.playerCount || 1);
+    const playersLeft = armedSave
+      ? (isOnline && armedSave.roomCode ? `Room ${armedSave.roomCode}` : `${pCountLocal} Player${pCountLocal > 1 ? 's' : ''}`)
+      : (isOnline && net?.roomCode ? `Room ${net.roomCode}` : `${pCountLocal} Player${pCountLocal > 1 ? 's' : ''}`);
+    const playersRight = isOnline ? 'Online' : 'Local';
     const matchTitle = armedSave ? (armedSave.matchName || 'Saved Match') : 'New Match';
     const mcStatus = mc?.getSavedStatusLabel ? mc.getSavedStatusLabel() : 'Saved';
 
@@ -53,10 +58,17 @@
         type: 'preset_name', id: 'menu-presets',
         title: levelTitle,
         categoryIndexText: 'Level',
-        color: armedSave ? '#953ffd' : '#10f000',
+        color: (armedSave || isGuestWaiting) ? '#953ffd' : '#10f000',
         onClick: () => {
           if (armedSave && typeof self.renderSavedMatchLevelView === 'function') {
             self.pushColumn('Level (View Only)', () => self.renderSavedMatchLevelView(armedSave));
+          } else if (isGuestWaiting && typeof self.renderSavedMatchLevelView === 'function') {
+            self.pushColumn('Level (View Only)', () => self.renderSavedMatchLevelView({
+              presetName: net.hostPresetName || 'Host Preset',
+              boardRadius: net.hostMatchConfig?.boardRadius || 6,
+              round: 1,
+              matchConfig: net.hostMatchConfig || {}
+            }));
           } else {
             self.pushColumn('Presets', () => self.renderFusedPresetColumn());
           }
@@ -64,11 +76,17 @@
       },
       {
         type: 'preset_name', id: 'single-multiplayer',
-        title: lobbyState,
-        categoryIndexText: 'Lobby',
-        color: (lobbyState === 'Online') ? '#3d6eff' : '#10f000',
-        isDoubleBorder: (lobbyState === 'Online'),
-        onClick: () => self.pushColumn('Lobby', () => self.renderMultiplayerColumn())
+        title: playersLeft,
+        categoryIndexText: playersRight,
+        color: isOnline ? '#3d6eff' : '#10f000',
+        isDoubleBorder: isOnline,
+        onClick: () => {
+          if (isGuestWaiting && global.RoomStatCanvas?.open) {
+            global.RoomStatCanvas.open({ origin: 'pod-preset-single-multiplayer' });
+            return;
+          }
+          self.pushColumn('Players', () => self.renderMultiplayerColumn());
+        }
       },
       {
         type: 'preset_name', id: 'saved-matches',

@@ -11,6 +11,13 @@
   const PEERJS_CDN = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const PREFIX = 'nammu-';
+  const ICE_SERVERS = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' }
+  ];
+  const PEER_OPTS = { debug: 0, config: { iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 } };
 
   function makeRoomCode(len = 4) {
     let out = '';
@@ -30,6 +37,11 @@
       this.connections = new Map(); // peerId -> DataConnection
       this.peerMeta = new Map();    // peerId -> { name, seatIndex }
       this.seatOwners = [];         // seatIndex -> peerId | null
+      this.roomSeats = [];          // [{ seatIndex, playerNum, name, ownerPeerId, isHost }]
+      this.localPlayerCount = 1;
+      this.hostLocalPlayerCount = 1;
+      this.searchingCode = '';
+      this.searchStatus = '';
       this.dom = {};
 
       this.lastLocalActivePlayerIndex = 0;
@@ -37,13 +49,21 @@
       this.pendingHostOfferForMe = false;
 
       this._peerScriptPromise = null;
+      this._searchRetryTimer = null;
       this._puzzleHooked = false;
       this._applyingRemote = false;
       this._lastCursorEmitMs = 0;
+      this._unloadBound = false;
     }
 
     init(dom = {}) {
       this.dom = dom;
+      if (!this._unloadBound && typeof window !== 'undefined') {
+        this._unloadBound = true;
+        const cleanup = () => { try { this.peer?.destroy?.(); } catch {} };
+        window.addEventListener('pagehide', cleanup);
+        window.addEventListener('beforeunload', cleanup);
+      }
       this._wireDrawerUI?.();
       this._updateDrawerUI?.();
       return true;
@@ -112,33 +132,59 @@
     }
 
     // ── HOST / JOIN / LEAVE LIFECYCLE ───────────────────────────────────────
+    stopSearch() {
+      if (this._searchRetryTimer) { clearTimeout(this._searchRetryTimer); this._searchRetryTimer = null; }
+      this.searchingCode = '';
+      this.searchStatus = '';
+    }
+
     async hostRoom(customCode = null, opts = {}) {
+      this.stopSearch();
       await this._cleanupPeerOnly();
       const PeerCtor = await this._ensurePeerJS();
       const code = (customCode || makeRoomCode(4)).toUpperCase().replace(/[^A-Z0-9]/g, '');
       const requestedId = `${PREFIX}${code}`;
+      const localCount = Math.max(1, Math.min(6, opts.localPlayerCount || global.GameSettingsCanvas?.config?.playerCount || this.localPlayerCount || 1));
+      this.localPlayerCount = localCount;
+      this.hostLocalPlayerCount = localCount;
+      this.searchStatus = 'Opening Room...';
+      this._notifyLobbyUpdate?.();
 
       return new Promise((resolve, reject) => {
-        const peer = new PeerCtor(requestedId);
+        let settled = false;
+        const peer = new PeerCtor(requestedId, PEER_OPTS);
         this.peer = peer;
-        this.role = 'host';
-        this.roomCode = code;
-        this.matchName = opts.matchName || this.matchName || `Match ${code}`;
 
         peer.on('open', (id) => {
-          this.myPeerId = id;
+          settled = true;
+          this.role = 'host';
+          this.roomCode = code;
           this.hostPeerId = id;
+          this.searchStatus = '';
+          this.matchName = opts.matchName || this.matchName || `Match ${code}`;
           const prof = global.MemoryCardManager?.getProfile?.() || { name: 'Host' };
-          this.peerMeta.set(id, { name: prof.name || 'Host', seatIndex: 0 });
-          this.seatOwners = [id];
+          this.peerMeta.set(id, { name: prof.name || 'Host', seatIndex: 0, localPlayerCount: localCount });
+          this._rebuildSeatRoster?.();
           this._bindHostIncoming(peer);
           this._updateDrawerUI?.();
+          this._notifyLobbyUpdate?.();
           global.GameState?.showToast?.(`🌐 Hosting Room: ${code}`);
           resolve({ ok: true, roomCode: code, peerId: id });
         });
 
         peer.on('error', (err) => {
-          global.GameState?.showToast?.(`⚠️ P2P Host Error: ${err.type || err.message}`);
+          if (!settled && err?.type === 'unavailable-id' && !opts._regenerated && !customCode) {
+            settled = true;
+            this.hostRoom(makeRoomCode(4), { ...opts, _regenerated: true }).then(resolve, reject);
+            return;
+          }
+          if (!settled) {
+            settled = true;
+            this.role = 'offline';
+            this.searchStatus = `Host Error: ${err?.type || err?.message || 'Failed'}`;
+            this._notifyLobbyUpdate?.();
+          }
+          global.GameState?.showToast?.(`⚠️ P2P Host Error: ${err?.type || err?.message}`);
           this._updateDrawerUI?.();
           reject(err);
         });
@@ -164,14 +210,22 @@
       return true;
     }
 
-    async joinRoom(roomCode) {
-      const code = (roomCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-      if (!code) {
-        global.GameState?.showToast?.('⚠️ Enter a valid Room Code.');
+    async joinRoom(roomCode, opts = {}) {
+      const code = (roomCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+      if (code.length < 4) {
+        global.GameState?.showToast?.('⚠️ Enter a valid 4-character Room Code.');
         return false;
       }
+      if (this._searchRetryTimer) { clearTimeout(this._searchRetryTimer); this._searchRetryTimer = null; }
+      const keepSearching = !!opts.keepSearching;
+      this.localPlayerCount = Math.max(1, Math.min(6, opts.localPlayerCount || global.GameSettingsCanvas?.config?.playerCount || this.localPlayerCount || 1));
+      this.searchingCode = code;
+      this.searchStatus = 'Connecting to Signaling...';
+      this._notifyLobbyUpdate?.();
+
       await this._cleanupPeerOnly();
       const PeerCtor = await this._ensurePeerJS();
+      if (keepSearching && this.searchingCode !== code) return false;
       const targetHostId = `${PREFIX}${code}`;
 
       return new Promise((resolve, reject) => {
@@ -180,35 +234,66 @@
           if (settled) return;
           settled = true;
           clearTimeout(timeoutId);
+          this._cleanupPeerOnly();
+          this.role = 'offline';
+          if (keepSearching && this.searchingCode === code) {
+            const label = err?.type === 'peer-unavailable' ? 'Room Not Open Yet — Retrying...'
+              : (err?.message === 'ice-failed' ? 'NAT Blocked Direct P2P — Retrying...' : 'Retrying Connection...');
+            this.searchStatus = label;
+            this._updateDrawerUI?.();
+            this._notifyLobbyUpdate?.();
+            this._searchRetryTimer = setTimeout(() => {
+              if (this.searchingCode === code && !this.isConnected()) {
+                this.joinRoom(code, opts).then(resolve, () => {});
+              }
+            }, 3200);
+            return;
+          }
+          this.searchingCode = '';
+          this.searchStatus = '';
           const msg = toastMsg || `⚠️ P2P Join Error: ${err?.type || err?.message || 'Unavailable'}`;
           if (err && typeof err === 'object') err._toasted = true;
           global.GameState?.showToast?.(msg);
-          this._cleanupPeerOnly();
-          this.role = 'offline';
           this._updateDrawerUI?.();
+          this._notifyLobbyUpdate?.();
           reject(err || new Error('Join failed'));
         };
         const timeoutId = setTimeout(() => {
           finishErr(new Error('timeout'), `⚠️ Could not reach Room ${code} (timed out).`);
-        }, 10000);
+        }, keepSearching ? 12000 : 14000);
 
-        const peer = new PeerCtor();
+        const peer = new PeerCtor(PEER_OPTS);
         this.peer = peer;
         this.role = 'guest';
         this.roomCode = code;
         this.hostPeerId = targetHostId;
 
         peer.on('open', (id) => {
+          if (keepSearching && this.searchingCode !== code) { settled = true; clearTimeout(timeoutId); return; }
           this.myPeerId = id;
+          this.searchStatus = 'Handshaking (NAT)...';
+          this._notifyLobbyUpdate?.();
           this._bindGuestIncoming(peer);
           const conn = peer.connect(targetHostId, { reliable: true });
+          const pc = conn?.peerConnection;
+          if (pc) {
+            pc.addEventListener('iceconnectionstatechange', () => {
+              const st = pc.iceConnectionState;
+              if (settled) return;
+              if (st === 'checking') { this.searchStatus = 'Checking NAT / Firewall...'; this._notifyLobbyUpdate?.(); }
+              else if (st === 'failed') { finishErr(new Error('ice-failed'), '⚠️ ICE Failed — firewall/NAT blocked direct P2P.'); }
+            });
+          }
           this._wireConnection(conn, () => {
             if (settled) return;
             settled = true;
             clearTimeout(timeoutId);
+            this.searchingCode = '';
+            this.searchStatus = '';
             const prof = global.MemoryCardManager?.getProfile?.() || { name: 'Guest' };
-            conn.send({ type: 'HELLO', peerId: id, name: prof.name || 'Guest' });
+            conn.send({ type: 'HELLO', peerId: id, name: prof.name || 'Guest', localPlayerCount: this.localPlayerCount });
             this._updateDrawerUI?.();
+            this._notifyLobbyUpdate?.();
             global.GameState?.showToast?.(`🌐 Joined Room: ${code}`);
             resolve({ ok: true, roomCode: code, peerId: id });
           }, (err) => finishErr(err));
@@ -219,15 +304,18 @@
     }
 
     async leaveRoom() {
+      this.stopSearch();
       await this._cleanupPeerOnly();
       this.role = 'offline';
       this.roomCode = '';
       this.hostPeerId = null;
       this.seatOwners = [];
+      this.roomSeats = [];
       this.peerMeta.clear();
       this.pendingHostOfferToPeerId = null;
       this.pendingHostOfferForMe = false;
       this._updateDrawerUI?.();
+      this._notifyLobbyUpdate?.();
       global.GameState?.showToast?.('🔌 Disconnected from P2P Room');
     }
 
@@ -280,35 +368,24 @@
       conn.on('close', () => {
         this.connections.delete(conn.peer);
         this.peerMeta.delete(conn.peer);
-        this.seatOwners = this.seatOwners.map(id => (id === conn.peer ? null : id));
-        if (this.role === 'host') this._broadcastRoster();
-        this._updateDrawerUI?.();
-      });
-    }
-
-    _assignDefaultSeats(playerCount = 6) {
-      const ids = [this.myPeerId, ...Array.from(this.connections.keys())].filter(Boolean);
-      for (let i = 0; i < Math.max(playerCount, ids.length); i++) {
-        if (!this.seatOwners[i] && ids[i]) {
-          this.seatOwners[i] = ids[i];
-          const meta = this.peerMeta.get(ids[i]);
-          if (meta) meta.seatIndex = i;
+        if (this.role === 'host') {
+          this._rebuildSeatRoster?.();
+          this._broadcastRoster();
+        } else {
+          this.seatOwners = this.seatOwners.map(id => (id === conn.peer ? null : id));
         }
-      }
-    }
-
-    _broadcast(msg, excludePeerId = null) {
-      this.connections.forEach((conn, pid) => {
-        if (pid !== excludePeerId && conn.open) conn.send(msg);
+        this._updateDrawerUI?.();
+        this._notifyLobbyUpdate?.();
       });
     }
 
     _buildRosterPayload() {
       const gsc = global.GameSettingsCanvas;
       const wp = gsc?.getActiveWorkingPreset?.();
+      const seats = this.getRoomSeats?.() || [];
       const playerCount = global.GameState?.matchStarted
         ? (global.GameState.playerCount || 1)
-        : (gsc?.config?.playerCount || 2);
+        : Math.max(1, seats.length);
       return {
         type: 'ROOM_ROSTER',
         roomCode: this.roomCode,
@@ -318,6 +395,7 @@
         matchConfig: wp?.match ? { ...wp.match, presetName: wp.name } : null,
         hostPeerId: this.hostPeerId,
         seatOwners: this.seatOwners,
+        seats,
         peers: Array.from(this.peerMeta.entries())
       };
     }

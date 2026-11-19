@@ -14,17 +14,123 @@
     return;
   }
 
+  proto._broadcast = function(msg, excludePeerId = null) {
+    this.connections.forEach((conn, pid) => {
+      if (pid !== excludePeerId && conn.open) conn.send(msg);
+    });
+  };
+
+  proto._assignDefaultSeats = function(playerCount = 6) {
+    const ids = [this.myPeerId, ...Array.from(this.connections.keys())].filter(Boolean);
+    for (let i = 0; i < Math.max(playerCount, ids.length); i++) {
+      if (!this.seatOwners[i] && ids[i]) {
+        this.seatOwners[i] = ids[i];
+        const meta = this.peerMeta.get(ids[i]);
+        if (meta) meta.seatIndex = i;
+      }
+    }
+  };
+
+  proto._notifyLobbyUpdate = function() {
+    global.RoomStatCanvas?.refreshIfOpen?.();
+    const gsc = global.GameSettingsCanvas;
+    if (gsc?.active) gsc.rebuildTopFrame?.();
+  };
+
+  proto._rebuildSeatRoster = function() {
+    if (this.role !== 'host') return this.getRoomSeats();
+    const seats = [];
+    const owners = [];
+    const hostCount = Math.max(1, Math.min(6, this.hostLocalPlayerCount || this.localPlayerCount || 1));
+    const hostMeta = this.peerMeta.get(this.myPeerId) || { name: 'Host' };
+
+    for (let i = 0; i < hostCount; i++) {
+      const idx = seats.length;
+      owners.push(this.myPeerId);
+      seats.push({
+        seatIndex: idx,
+        playerNum: idx + 1,
+        name: `Player ${idx + 1}`,
+        deviceName: hostMeta.name || 'Host',
+        ownerPeerId: this.myPeerId,
+        isHost: true
+      });
+    }
+
+    this.connections.forEach((_, pid) => {
+      if (pid === this.myPeerId) return;
+      const meta = this.peerMeta.get(pid) || {};
+      const cnt = Math.max(1, Math.min(6, meta.localPlayerCount || 1));
+      meta.seatIndex = seats.length;
+      this.peerMeta.set(pid, meta);
+      for (let k = 0; k < cnt; k++) {
+        const idx = seats.length;
+        owners.push(pid);
+        seats.push({
+          seatIndex: idx,
+          playerNum: idx + 1,
+          name: `Player ${idx + 1}`,
+          deviceName: meta.name || `Guest`,
+          ownerPeerId: pid,
+          isHost: false
+        });
+      }
+    });
+
+    this.seatOwners = owners;
+    this.roomSeats = seats;
+    return seats;
+  };
+
+  proto.getRoomSeats = function() {
+    if (this.role === 'host') return this._rebuildSeatRoster();
+    if (this.role === 'guest' && this.isConnected() && Array.isArray(this.roomSeats) && this.roomSeats.length > 0) {
+      return this.roomSeats;
+    }
+    const cnt = Math.max(1, Math.min(6, this.localPlayerCount || global.GameSettingsCanvas?.config?.playerCount || 1));
+    const out = [];
+    for (let i = 0; i < cnt; i++) {
+      out.push({
+        seatIndex: i,
+        playerNum: i + 1,
+        name: `Player ${i + 1}`,
+        deviceName: 'You (Local)',
+        ownerPeerId: this.myPeerId || 'local',
+        isHost: false
+      });
+    }
+    return out;
+  };
+
+  proto.setLocalPlayerCount = function(count) {
+    const clean = Math.max(1, Math.min(6, Number(count) || 1));
+    this.localPlayerCount = clean;
+    if (this.role === 'host') {
+      this.hostLocalPlayerCount = clean;
+      this._rebuildSeatRoster();
+      this._broadcastRoster();
+      this._notifyLobbyUpdate();
+    } else if (this.role === 'guest' && this.isConnected()) {
+      const hostConn = this.connections.get(this.hostPeerId) || Array.from(this.connections.values())[0];
+      const prof = global.MemoryCardManager?.getProfile?.() || { name: 'Guest' };
+      if (hostConn?.open) hostConn.send({ type: 'HELLO', peerId: this.myPeerId, name: prof.name || 'Guest', localPlayerCount: clean });
+      this._notifyLobbyUpdate();
+    }
+  };
+
   // ── MESSAGE DISPATCH & REMOTE REPLAY ──────────────────────────────────────
   proto._handleMessage = function(fromPeerId, msg) {
     if (!msg || !msg.type) return;
 
     if (msg.type === 'HELLO' && this.role === 'host') {
-      const seatIdx = this.seatOwners.findIndex(id => !id);
-      const assigned = seatIdx !== -1 ? seatIdx : this.seatOwners.length;
-      this.seatOwners[assigned] = fromPeerId;
-      this.peerMeta.set(fromPeerId, { name: msg.name || `Player ${assigned + 1}`, seatIndex: assigned });
+      const seatCount = Math.max(1, Math.min(6, msg.localPlayerCount || 1));
+      const existing = this.peerMeta.get(fromPeerId);
+      const seatIdx = existing?.seatIndex ?? this.seatOwners.length;
+      this.peerMeta.set(fromPeerId, { name: msg.name || `Player ${seatIdx + 1}`, seatIndex: seatIdx, localPlayerCount: seatCount });
+      this._rebuildSeatRoster();
       this._broadcastRoster();
       this._updateDrawerUI();
+      this._notifyLobbyUpdate();
       return;
     }
 
@@ -36,6 +142,7 @@
       if (msg.matchConfig) this.hostMatchConfig = msg.matchConfig;
       this.hostPeerId = msg.hostPeerId || this.hostPeerId;
       this.seatOwners = msg.seatOwners || [];
+      if (Array.isArray(msg.seats)) this.roomSeats = msg.seats;
       if (Array.isArray(msg.peers)) this.peerMeta = new Map(msg.peers);
       if (this.role === 'guest' && this.roomCode) {
         global.MemoryCardManager?.saveJoinedLobbyMatch?.({
@@ -47,6 +154,7 @@
         });
       }
       this._updateDrawerUI();
+      this._notifyLobbyUpdate();
       return;
     }
 
@@ -169,6 +277,9 @@
     }
     this._applyingRemote = true;
     try {
+      if (global.RoomStatCanvas?.isOpen?.()) {
+        global.RoomStatCanvas.close({ returnToMenu: false, immediate: true, silent: true });
+      }
       global.MemoryCardManager?.restorePuzzleState?.(snap);
       global.MemoryCardManager?.saveActivePuzzleMatch?.(snap.id);
       this._updateDrawerUI();

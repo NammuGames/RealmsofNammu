@@ -111,6 +111,10 @@
         hit = this.hitTestNode(global.GameSettingsRenamePopup.frameNode, pos.x, pos.y);
       } else if (global.TurnConfirmPopup?.isOpen?.() && global.TurnConfirmPopup.frameNode) {
         hit = this.hitTestNode(global.TurnConfirmPopup.frameNode, pos.x, pos.y);
+        if (!hit) {
+          const btnPlace = global.UISidebarDeck?.rightButtonNodes?.[4];
+          if (btnPlace && btnPlace.containsScreenPoint?.(pos.x, pos.y)) hit = btnPlace;
+        }
       } else {
         hit = this.hitTestNode(this.root, pos.x, pos.y);
       }
@@ -141,8 +145,9 @@
       } else if (global.TurnConfirmPopup?.isOpen?.() && global.TurnConfirmPopup.frameNode) {
         const frame = global.TurnConfirmPopup.frameNode;
         const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
-        const btnConfirm = global.UISidebarDeck?.rightButtonNodes?.[5];
-        const hitConfirmBtn = !!(btnConfirm && btnConfirm.containsScreenPoint?.(pos.x, pos.y));
+        const btnPlace = global.UISidebarDeck?.rightButtonNodes?.[4];
+        const btnEnd = global.UISidebarDeck?.rightButtonNodes?.[5];
+        const hitConfirmBtn = !!((btnPlace && btnPlace.containsScreenPoint?.(pos.x, pos.y)) || (btnEnd && !btnEnd.ghost && btnEnd.containsScreenPoint?.(pos.x, pos.y)));
         if (!hitPopup && !hitConfirmBtn) {
           if (!frame.animating) global.TurnConfirmPopup.close();
           return;
@@ -172,8 +177,9 @@
       } else if (global.TurnConfirmPopup?.isOpen?.() && global.TurnConfirmPopup.frameNode) {
         const frame = global.TurnConfirmPopup.frameNode;
         const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
-        const btnConfirm = global.UISidebarDeck?.rightButtonNodes?.[5];
-        const hitConfirmBtn = !!(btnConfirm && btnConfirm.containsScreenPoint?.(pos.x, pos.y));
+        const btnPlace = global.UISidebarDeck?.rightButtonNodes?.[4];
+        const btnEnd = global.UISidebarDeck?.rightButtonNodes?.[5];
+        const hitConfirmBtn = !!((btnPlace && btnPlace.containsScreenPoint?.(pos.x, pos.y)) || (btnEnd && !btnEnd.ghost && btnEnd.containsScreenPoint?.(pos.x, pos.y)));
         if (!hitPopup && !hitConfirmBtn) {
           if (!frame.animating) global.TurnConfirmPopup.close();
           return;

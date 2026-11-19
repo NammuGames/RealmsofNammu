@@ -50,6 +50,18 @@
 
   proto.confirm = function() {
     if (!this.active) return;
+    if (this.mode === 'roomCode') {
+      const code = String(this.targetItem?.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+      if (code.length < 4) {
+        if (global.AudioSynth?.playDetonateChime) global.AudioSynth.playDetonateChime(1);
+        global.GameState?.showToast?.('⚠️ Enter a 4-character Room Code!');
+        this._focusMobileInput?.();
+        return;
+      }
+      this.targetItem.name = code;
+      this.close(true);
+      return;
+    }
     this.finalizeNameInput();
     this.finalizeTagInput();
     const candTag = this.getCurrentCandidateTag();
@@ -88,11 +100,35 @@
     this.unbindKeyboard();
     this.keyHandler = (e) => {
       if (!this.active || !this.targetItem) return;
+      if (this._mobileInput && e.target === this._mobileInput) return;
       e.stopPropagation();
 
       if (e.key === 'Escape') {
         e.preventDefault();
         this.cancel();
+        return;
+      }
+
+      if (this.mode === 'roomCode') {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.confirm();
+        } else if (e.key === 'Backspace') {
+          e.preventDefault();
+          this.targetItem.name = (this.targetItem.name || '').slice(0, -1);
+          if (this._mobileInput) this._mobileInput.value = this.targetItem.name;
+          if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
+          this.triggerRender();
+        } else if (/^[a-zA-Z0-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          const cur = (this.targetItem.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          if (cur.length < 4) {
+            this.targetItem.name = cur + e.key.toUpperCase();
+            if (this._mobileInput) this._mobileInput.value = this.targetItem.name;
+            if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
+            this.triggerRender();
+          }
+        }
         return;
       }
 
@@ -167,6 +203,16 @@
     const HexNode = global.HexNode, traits = global.HexTraits;
     if (!HexNode || !traits) return null;
 
+    const isRoomMode = (this.mode === 'roomCode');
+    const handleRoomTap = () => {
+      const code = String(self.targetItem?.name || '').replace(/[^A-Za-z0-9]/g, '');
+      if (code.length >= 4) {
+        self.confirm();
+      } else {
+        self._focusMobileInput?.();
+      }
+    };
+
     // Pop-Up Frame: Exact Sigil Instructions text frame dimensions (733x380, apex 116)
     const frame = new HexNode({
       id: 'rename-popup-frame', position: { x: 0, y: 0 },
@@ -181,6 +227,7 @@
     frame.addTrait(new traits.ButtonTrait({
       hoverOutline: false, soundClick: false,
       onClick: () => {
+        if (isRoomMode) { handleRoomTap(); return; }
         self.finalizeTagInput();
         self.activeField = null;
         self.triggerRender();
@@ -209,6 +256,7 @@
       pod.isSidebarButton = true;
       pod.addTrait(new traits.ButtonTrait({
         onClick: () => {
+          if (isRoomMode) { handleRoomTap(); return; }
           if (self.activeField === 'tag' && fieldKey !== 'tag') {
             self.finalizeTagInput();
           }
@@ -226,11 +274,14 @@
           ctx.save();
           ctx.font = `400 ${textSize}px "Sci-Fae", "SciFaePseudoScript10", sans-serif`;
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          const baseTxt = getTxt() != null ? String(getTxt()) : '';
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.65)'; ctx.fillText(baseTxt, 0.5, textY + 0.5);
-          ctx.fillStyle = isDup ? '#ff3333' : (isFoc ? '#ffffff' : '#e2e8f0'); ctx.fillText(baseTxt, 0, textY);
+          const rawTxt = getTxt() != null ? String(getTxt()) : '';
+          const isPlaceholder = (isRoomMode && fieldKey === 'code' && rawTxt.length === 0);
+          const displayTxt = isPlaceholder ? 'xxxx' : rawTxt;
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.65)'; ctx.fillText(displayTxt, 0.5, textY + 0.5);
+          ctx.fillStyle = isPlaceholder ? 'rgba(148, 163, 184, 0.55)' : (isDup ? '#ff3333' : (isFoc ? '#ffffff' : '#e2e8f0'));
+          ctx.fillText(displayTxt, 0, textY);
           if (isFoc && self.cursorVisible) {
-            const curX = ctx.measureText(baseTxt).width * 0.5 + 4;
+            const curX = isPlaceholder ? (ctx.measureText('xxxx').width * 0.5 + 4) : (ctx.measureText(rawTxt).width * 0.5 + 4);
             ctx.fillStyle = 'rgba(0, 0, 0, 0.65)'; ctx.fillText('|', curX + 0.5, textY + 0.5);
             ctx.fillStyle = isDup ? '#ff3333' : '#ffffff'; ctx.fillText('|', curX, textY);
           }
@@ -240,23 +291,31 @@
       return pod;
     };
 
-    // Top Row Sub-Pod: Preset Name (Left sub-pod of Preset Name Button, Purple #953ffd)
-    frame.addChild(makeSubPod(
-      'rename-sub-top', rowY - ySpacing, topW, '#953ffd', '#c084fc', 'name',
-      () => (self.targetItem.name != null ? self.targetItem.name : '')
-    ));
+    if (isRoomMode) {
+      const curLen = String(this.targetItem?.name || '').length;
+      const readyCol = curLen >= 4 ? '#10f000' : '#3d6eff';
+      const readyAct = curLen >= 4 ? '#4ade80' : '#38bdf8';
+      frame.addChild(makeSubPod('rename-sub-top', rowY - ySpacing, topW, '#953ffd', '#953ffd', null, () => 'Enter Room Code'));
+      frame.addChild(makeSubPod('rename-sub-btm', rowY + ySpacing, Math.max(bottomW, 240), readyCol, readyAct, 'code', () => this.targetItem.name || ''));
+    } else {
+      // Top Row Sub-Pod: Preset Name (Left sub-pod of Preset Name Button, Purple #953ffd)
+      frame.addChild(makeSubPod(
+        'rename-sub-top', rowY - ySpacing, topW, '#953ffd', '#c084fc', 'name',
+        () => (self.targetItem.name != null ? self.targetItem.name : '')
+      ));
 
-    // Bottom Row Sub-Pod: "###" Index Tag (Right sub-pod of Preset Name Button, Blue #3d6eff)
-    // Displays raw input while typing (e.g. "56"), and finalized 3-digit format when blurred
-    frame.addChild(makeSubPod(
-      'rename-sub-btm', rowY + ySpacing, bottomW, '#3d6eff', '#38bdf8', 'tag',
-      () => {
-        if (self.activeField === 'tag' && self.rawTagBuffer !== null) {
-          return self.rawTagBuffer;
+      // Bottom Row Sub-Pod: "###" Index Tag (Right sub-pod of Preset Name Button, Blue #3d6eff)
+      // Displays raw input while typing (e.g. "56"), and finalized 3-digit format when blurred
+      frame.addChild(makeSubPod(
+        'rename-sub-btm', rowY + ySpacing, bottomW, '#3d6eff', '#38bdf8', 'tag',
+        () => {
+          if (self.activeField === 'tag' && self.rawTagBuffer !== null) {
+            return self.rawTagBuffer;
+          }
+          return self.targetItem.tagNumber || '';
         }
-        return self.targetItem.tagNumber || '';
-      }
-    ));
+      ));
+    }
 
     this.frameNode = frame;
     frame.visible = true;

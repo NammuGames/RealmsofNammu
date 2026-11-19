@@ -31,9 +31,21 @@
     if (msg.type === 'ROOM_ROSTER') {
       this.roomCode = msg.roomCode || this.roomCode;
       if (msg.matchName) this.matchName = msg.matchName;
+      if (msg.presetName) this.hostPresetName = msg.presetName;
+      if (typeof msg.playerCount === 'number') this.hostPlayerCount = msg.playerCount;
+      if (msg.matchConfig) this.hostMatchConfig = msg.matchConfig;
       this.hostPeerId = msg.hostPeerId || this.hostPeerId;
       this.seatOwners = msg.seatOwners || [];
       if (Array.isArray(msg.peers)) this.peerMeta = new Map(msg.peers);
+      if (this.role === 'guest' && this.roomCode) {
+        global.MemoryCardManager?.saveJoinedLobbyMatch?.({
+          roomCode: this.roomCode,
+          matchName: this.matchName,
+          presetName: this.hostPresetName,
+          playerCount: this.hostPlayerCount,
+          matchConfig: this.hostMatchConfig
+        });
+      }
       this._updateDrawerUI();
       return;
     }

@@ -60,8 +60,12 @@
         return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
       };
 
+      const isSyntheticMouse = (e) => !!e?.sourceCapabilities?.firesTouchEvents || (performance.now() - (global.__LAST_CANVAS_TOUCH_MS || -9999) < 700);
+      const markTouch = () => { global.__LAST_CANVAS_TOUCH_MS = performance.now(); };
+
       // 1. Mouse Move: Hover tracking & Drag delta
       canvas.addEventListener('mousemove', (e) => {
+        if (isSyntheticMouse(e)) return;
         const pos = getScreenPos(e);
         const state = global.GameState;
         const renderer = global.BoardRenderer;
@@ -98,6 +102,7 @@
 
       // 2. Mouse & Touch Down: Track start of potential drag
       canvas.addEventListener('mousedown', (e) => {
+        if (isSyntheticMouse(e)) return;
         if (this.isAnyCanvasOpen() || !global.GameState?.matchStarted || global.GameState?.isMatchStarting || global.GameState?.isMatchEnding) return;
         this.isMouseDown = true;
         this.hasDragged = false;
@@ -106,6 +111,7 @@
       });
 
       canvas.addEventListener('touchstart', (e) => {
+        markTouch();
         if (this.isAnyCanvasOpen() || !global.GameState?.matchStarted || global.GameState?.isMatchStarting || global.GameState?.isMatchEnding) return;
         this.isMouseDown = true;
         this.hasDragged = false;
@@ -115,6 +121,7 @@
       }, { passive: true });
 
       canvas.addEventListener('touchmove', (e) => {
+        markTouch();
         if (!this.isMouseDown) return;
         const t = e.touches[0];
         if (!t) return;
@@ -126,6 +133,7 @@
 
       // 3. Window Mouse & Touch Up: Detect clicks vs pans on board
       window.addEventListener('mouseup', (e) => {
+        if (isSyntheticMouse(e)) return;
         if (!this.isMouseDown) return;
         this.isMouseDown = false;
 
@@ -138,6 +146,7 @@
       });
 
       window.addEventListener('touchend', (e) => {
+        if (e.target === canvas) markTouch();
         if (!this.isMouseDown) return;
         this.isMouseDown = false;
         if (!this.hasDragged && e.target === canvas) {
@@ -145,6 +154,11 @@
           const pos = getScreenPos(t);
           this.handleBoardClick(pos.x, pos.y);
         }
+        this.hasDragged = false;
+      }, { passive: true });
+
+      window.addEventListener('touchcancel', () => {
+        this.isMouseDown = false;
         this.hasDragged = false;
       }, { passive: true });
 

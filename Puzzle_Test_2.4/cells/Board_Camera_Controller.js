@@ -41,9 +41,10 @@
       };
 
       const getStageScale = () => global.ResponsiveViewportAdapter?.stageScale || engine?.stageScale || 1.0;
+      const isSyntheticMouse = (e) => !!e?.sourceCapabilities?.firesTouchEvents || (performance.now() - (global.__LAST_CANVAS_TOUCH_MS || -9999) < 700);
 
       canvasBoard.addEventListener('mousedown', (e) => {
-        if (state.cameraLocked) return;
+        if (isSyntheticMouse(e) || state.cameraLocked) return;
         const pos = toBackingPos(e.clientX, e.clientY);
         const hit = engine.hitTestNode(engine.root, pos.x, pos.y);
         if (hit === engine.boardFrame || hit === engine.root) {
@@ -55,7 +56,7 @@
       });
 
       window.addEventListener('mousemove', (e) => {
-        if (!state.isDraggingBoard || state.cameraLocked) return;
+        if (isSyntheticMouse(e) || !state.isDraggingBoard || state.cameraLocked) return;
         const sc = getStageScale();
         const dx = (e.clientX - state.lastMouseX) / sc;
         const dy = (e.clientY - state.lastMouseY) / sc;
@@ -65,7 +66,8 @@
         state.lastMouseY = e.clientY;
       });
 
-      window.addEventListener('mouseup', () => {
+      window.addEventListener('mouseup', (e) => {
+        if (isSyntheticMouse(e)) return;
         if (state.isDraggingBoard) {
           state.isDraggingBoard = false;
           viewport.style.cursor = 'default';

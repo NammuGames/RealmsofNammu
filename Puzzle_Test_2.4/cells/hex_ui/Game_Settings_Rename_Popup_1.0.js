@@ -22,10 +22,60 @@
 
   class GameSettingsRenamePopupClass {
     constructor() {
-      this.active = false; this.targetItem = null; this.categoryLabel = 'Preset'; this.defaultNum = 1;
+      this.active = false; this.mode = 'rename'; this.targetItem = null; this.categoryLabel = 'Preset'; this.defaultNum = 1;
       this.activeField = null; this.rawTagBuffer = null; this.cursorVisible = true; this.cursorInterval = null;
-      this.keyHandler = null; this.onDoneCallback = null; this.presetList = null;
+      this.keyHandler = null; this.onDoneCallback = null; this.presetList = null; this._mobileInput = null;
       this.config = Object.assign({}, DEFAULT_POPUP_CONFIG);
+    }
+
+    _focusMobileInput() {
+      if (typeof document === 'undefined' || this.mode !== 'roomCode') return;
+      let inp = this._mobileInput || document.getElementById('nammu-room-code-input');
+      if (!inp) {
+        inp = document.createElement('input');
+        inp.id = 'nammu-room-code-input';
+        inp.type = 'text';
+        inp.autocomplete = 'off';
+        inp.autocapitalize = 'characters';
+        inp.spellcheck = false;
+        inp.setAttribute('enterkeyhint', 'done');
+        Object.assign(inp.style, {
+          position: 'fixed', left: '50%', top: '50%', width: '2px', height: '2px',
+          opacity: '0.001', border: '0', padding: '0', margin: '0',
+          background: 'transparent', color: 'transparent', fontSize: '16px', pointerEvents: 'none', zIndex: '-1'
+        });
+        document.body.appendChild(inp);
+      }
+      this._mobileInput = inp;
+      inp.maxLength = 4;
+      inp.value = (this.targetItem?.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+      inp.oninput = () => {
+        if (!this.active || this.mode !== 'roomCode' || !this.targetItem) return;
+        const clean = inp.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+        inp.value = clean;
+        if (this.targetItem.name !== clean) {
+          this.targetItem.name = clean;
+          if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
+          this.triggerRender();
+        }
+      };
+      inp.onkeydown = (e) => {
+        if (!this.active || this.mode !== 'roomCode') return;
+        if (e.key === 'Enter') { e.preventDefault(); this.confirm(); }
+        else if (e.key === 'Escape') { e.preventDefault(); this.cancel(); }
+      };
+      try { inp.focus({ preventScroll: true }); } catch { inp.focus(); }
+    }
+
+    _blurMobileInput() {
+      if (this._mobileInput) {
+        try { this._mobileInput.blur(); } catch {}
+      }
+    }
+
+    openRoomCode(initialCode = '', onConfirm = null, options = {}) {
+      const cleaned = String(initialCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+      return this.open({ name: cleaned, tagNumber: '' }, 'Room Code', 1, onConfirm, null, { ...options, mode: 'roomCode' });
     }
 
     setConfig(updates) {
@@ -125,6 +175,7 @@
     open(targetItem, categoryLabel = 'Preset', defaultNum = 1, onDone = null, presetList = null, options = {}) {
       if (this.isOpen()) return;
       this.active = true;
+      this.mode = options?.mode === 'roomCode' ? 'roomCode' : 'rename';
       this.targetItem = (typeof targetItem === 'object' && targetItem) ? targetItem : { name: String(targetItem || 'Preset') };
       this.initialName = this.targetItem.name;
       this.initialTagNumber = this.targetItem.tagNumber;
@@ -132,12 +183,12 @@
       this.defaultNum = defaultNum;
       this.onDoneCallback = onDone;
       this.presetList = presetList || global.GameSettingsCanvas?.getCurrentDraft?.()?.list || null;
-      this.activeField = 'name'; // Focus Preset Name pod immediately on open
+      this.activeField = (this.mode === 'roomCode') ? 'code' : 'name'; // Focus active pod immediately on open
       this.rawTagBuffer = null;
       this.isAddNew = !!(options && (options.isAddNew || options.isNew));
       this.originNode = options?.originNode || options?.originNodeOrId || global.HexUIEngine?.lastClickedNode;
 
-      if (!this.targetItem.tagNumber) {
+      if (this.mode !== 'roomCode' && !this.targetItem.tagNumber) {
         this.targetItem.tagNumber = String(defaultNum).padStart(3, '0');
       }
 
@@ -149,6 +200,7 @@
       }, 450);
 
       this.bindKeyboard();
+      if (this.mode === 'roomCode') this._focusMobileInput();
       if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
       global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
       this.triggerRender();
@@ -182,6 +234,7 @@
       this.rawTagBuffer = null;
       this.active = false;
       this.activeField = null;
+      this._blurMobileInput();
       if (this.cursorInterval) { clearInterval(this.cursorInterval); this.cursorInterval = null; }
       this.unbindKeyboard();
       if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
@@ -202,7 +255,8 @@
 
     close(force = false) {
       if (!this.active || (!force && this.frameNode?.animating)) return;
-      if (!force) {
+      const isRoomMode = (this.mode === 'roomCode');
+      if (!force && !isRoomMode) {
         const candNum = parseInt(this.getCurrentCandidateTag(), 10);
         if (this.isDefaultSlot(candNum)) {
           if (global.AudioSynth?.playDetonateChime) global.AudioSynth.playDetonateChime(1);
@@ -216,10 +270,15 @@
           return;
         }
       }
-      this.finalizeNameInput();
-      this.finalizeTagInput();
+      if (isRoomMode) {
+        this.targetItem.name = String(this.targetItem?.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+      } else {
+        this.finalizeNameInput();
+        this.finalizeTagInput();
+      }
       this.active = false;
       this.activeField = null;
+      this._blurMobileInput();
       if (this.cursorInterval) { clearInterval(this.cursorInterval); this.cursorInterval = null; }
       this.unbindKeyboard();
       if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
@@ -229,7 +288,7 @@
       if (this.isAddNew && global.GameSettingsCanvas) {
         global.GameSettingsCanvas._skipColumnAnimation = true;
       }
-      if (typeof this.onDoneCallback === 'function') this.onDoneCallback();
+      if (typeof this.onDoneCallback === 'function') this.onDoneCallback(isRoomMode ? this.targetItem?.name : undefined);
 
       const onDone = () => this._cleanupFrame();
 

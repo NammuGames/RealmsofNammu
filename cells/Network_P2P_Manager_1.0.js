@@ -101,7 +101,10 @@
         s.onload = () => (typeof global.Peer === 'function' ? resolve(global.Peer) : reject(new Error('PeerJS failed to initialize')));
         s.onerror = () => {
           this._peerScriptPromise = null;
-          reject(new Error('Could not load PeerJS library from CDN.'));
+          const err = new Error('Could not load PeerJS library from CDN.');
+          err._toasted = true;
+          global.GameState?.showToast?.('⚠️ P2P library unavailable (check internet/ad-blocker).');
+          reject(err);
         };
         document.body.appendChild(s);
       });
@@ -172,6 +175,23 @@
       const targetHostId = `${PREFIX}${code}`;
 
       return new Promise((resolve, reject) => {
+        let settled = false;
+        const finishErr = (err, toastMsg = null) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          const msg = toastMsg || `⚠️ P2P Join Error: ${err?.type || err?.message || 'Unavailable'}`;
+          if (err && typeof err === 'object') err._toasted = true;
+          global.GameState?.showToast?.(msg);
+          this._cleanupPeerOnly();
+          this.role = 'offline';
+          this._updateDrawerUI?.();
+          reject(err || new Error('Join failed'));
+        };
+        const timeoutId = setTimeout(() => {
+          finishErr(new Error('timeout'), `⚠️ Could not reach Room ${code} (timed out).`);
+        }, 10000);
+
         const peer = new PeerCtor();
         this.peer = peer;
         this.role = 'guest';
@@ -183,19 +203,18 @@
           this._bindGuestIncoming(peer);
           const conn = peer.connect(targetHostId, { reliable: true });
           this._wireConnection(conn, () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeoutId);
             const prof = global.MemoryCardManager?.getProfile?.() || { name: 'Guest' };
             conn.send({ type: 'HELLO', peerId: id, name: prof.name || 'Guest' });
             this._updateDrawerUI?.();
             global.GameState?.showToast?.(`🌐 Joined Room: ${code}`);
             resolve({ ok: true, roomCode: code, peerId: id });
-          });
+          }, (err) => finishErr(err));
         });
 
-        peer.on('error', (err) => {
-          global.GameState?.showToast?.(`⚠️ P2P Join Error: ${err.type || err.message}`);
-          this._updateDrawerUI?.();
-          reject(err);
-        });
+        peer.on('error', (err) => finishErr(err));
       });
     }
 
@@ -241,7 +260,7 @@
       peer.on('connection', (conn) => this._wireConnection(conn));
     }
 
-    _wireConnection(conn, onOpenCb = null) {
+    _wireConnection(conn, onOpenCb = null, onErrCb = null) {
       conn.on('open', () => {
         this.connections.set(conn.peer, conn);
         if (this.role === 'host') {
@@ -256,6 +275,7 @@
       });
 
       conn.on('data', (msg) => this._handleMessage?.(conn.peer, msg));
+      if (typeof onErrCb === 'function') conn.on('error', (err) => onErrCb(err));
 
       conn.on('close', () => {
         this.connections.delete(conn.peer);
@@ -283,26 +303,31 @@
       });
     }
 
-    _sendRosterTo(conn) {
-      conn.send({
+    _buildRosterPayload() {
+      const gsc = global.GameSettingsCanvas;
+      const wp = gsc?.getActiveWorkingPreset?.();
+      const playerCount = global.GameState?.matchStarted
+        ? (global.GameState.playerCount || 1)
+        : (gsc?.config?.playerCount || 2);
+      return {
         type: 'ROOM_ROSTER',
         roomCode: this.roomCode,
-        matchName: this.matchName || '',
+        matchName: this.matchName || global.GameState?.matchName || '',
+        presetName: wp?.name || global.GameState?.matchConfig?.presetName || 'Meditate',
+        playerCount,
+        matchConfig: wp?.match ? { ...wp.match, presetName: wp.name } : null,
         hostPeerId: this.hostPeerId,
         seatOwners: this.seatOwners,
         peers: Array.from(this.peerMeta.entries())
-      });
+      };
+    }
+
+    _sendRosterTo(conn) {
+      conn.send(this._buildRosterPayload());
     }
 
     _broadcastRoster() {
-      this._broadcast({
-        type: 'ROOM_ROSTER',
-        roomCode: this.roomCode,
-        matchName: this.matchName || '',
-        hostPeerId: this.hostPeerId,
-        seatOwners: this.seatOwners,
-        peers: Array.from(this.peerMeta.entries())
-      });
+      this._broadcast(this._buildRosterPayload());
     }
 
     /** Step 1 of Pass Host: Sends HOST_OFFER to un-ghost Receive Host on target Guest. */

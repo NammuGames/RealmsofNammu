@@ -15,6 +15,21 @@
     : (global.GameSettingsCanvas ? Object.getPrototypeOf(global.GameSettingsCanvas) : null);
   if (!Proto) return;
 
+  const origLobbyPop = Proto.popColumn;
+  if (typeof origLobbyPop === 'function') {
+    Proto.popColumn = function(options = {}) {
+      this._joiningRoom = false;
+      return origLobbyPop.call(this, options);
+    };
+  }
+  const origLobbyClose = Proto.close;
+  if (typeof origLobbyClose === 'function') {
+    Proto.close = function(onDone) {
+      this._joiningRoom = false;
+      return origLobbyClose.call(this, onDone);
+    };
+  }
+
   Proto.getPendingRoomCode = function() {
     if (!this.config.pendingRoomCode) {
       this.config.pendingRoomCode = global.MemoryCardManager?.generateUniqueRoomCode?.() || '4K9P';
@@ -218,38 +233,101 @@
     ]);
   };
 
+  Proto._connectWithRoomCode = function(rawCode) {
+    const net = global.NetworkP2PManager;
+    if (!net) {
+      global.GameState?.showToast?.('⚠️ Online P2P only active inside Nammu Hub.');
+      return Promise.resolve(false);
+    }
+    const code = String(rawCode || this._joinRoomCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+    if (code.length < 4) {
+      global.GameState?.showToast?.('⚠️ Enter a 4-character Room Code.');
+      return Promise.resolve(false);
+    }
+    if (this._joiningRoom) return Promise.resolve(false);
+    this._joinRoomCode = code;
+    this._joiningRoom = true;
+    global.GameState?.showToast?.(`🔄 Connecting to Room ${code}...`);
+    this.rebuildTopFrame();
+
+    return net.joinRoom(code).then((res) => {
+      this._joiningRoom = false;
+      if (!res || !res.ok) {
+        this.rebuildTopFrame();
+        return false;
+      }
+      this.config.lobbyMode = 'Online';
+      global.MemoryCardManager?.saveJoinedLobbyMatch?.({
+        roomCode: net.roomCode || code,
+        matchName: net.matchName,
+        presetName: net.hostPresetName,
+        playerCount: net.hostPlayerCount,
+        matchConfig: net.hostMatchConfig
+      });
+      if (typeof this.popToRoot === 'function') this.popToRoot();
+      else this.rebuildTopFrame();
+      return true;
+    }).catch((err) => {
+      this._joiningRoom = false;
+      if (!err?._toasted) {
+        global.GameState?.showToast?.(`⚠️ Could not join Room ${code}: ${err?.type || err?.message || 'Unavailable'}`);
+      }
+      this.rebuildTopFrame();
+      return false;
+    });
+  };
+
   Proto.renderJoinRoomColumn = function() {
     const self = this;
     const net = global.NetworkP2PManager;
     const isJoined = net?.role === 'guest';
-    const code = this._joinRoomCode || '';
+    const isJoining = !!this._joiningRoom;
+    const code = (this._joinRoomCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
 
     const items = [
       {
         type: 'preset_name', id: 'join-code-entry',
-        title: code || 'Tap To Enter',
+        title: code || 'xxxx',
         categoryIndexText: 'Room Code',
         color: code ? '#10f000' : '#3d6eff',
         isDoubleBorder: !!code,
-        onClick: () => self._focusHiddenInput({
-          maxLength: 8,
-          initialValue: self._joinRoomCode || '',
-          transform: (v) => v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8),
-          onChange: (val) => { self._joinRoomCode = val; },
-          onSubmit: () => {
-            if (!net || !self._joinRoomCode) return;
-            net.joinRoom(self._joinRoomCode).then(() => self.rebuildTopFrame()).catch(() => {});
+        onClick: () => {
+          if (isJoining) return;
+          if (global.GameSettingsRenamePopup?.openRoomCode) {
+            global.GameSettingsRenamePopup.openRoomCode(self._joinRoomCode || '', (enteredCode) => {
+              if (!enteredCode) return;
+              self._joinRoomCode = enteredCode;
+              self._connectWithRoomCode(enteredCode);
+            }, { originNode: 'pod-preset-join-code-entry' });
+            return;
           }
-        })
+          self._focusHiddenInput({
+            maxLength: 4,
+            initialValue: self._joinRoomCode || '',
+            transform: (v) => v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4),
+            onChange: (val) => { self._joinRoomCode = val; },
+            onSubmit: (val) => { self._connectWithRoomCode(val); }
+          });
+        }
       },
       {
         type: 'base', id: 'join-connect-btn',
-        title: isJoined ? `Leave (${net.roomCode})` : 'Join Match',
-        color: isJoined ? '#ff3333' : '#10f000',
+        title: isJoining ? 'Joining...' : (isJoined ? `Leave (${net.roomCode})` : 'Join Match'),
+        color: isJoined ? '#ff3333' : (isJoining ? '#953ffd' : '#10f000'),
         onClick: () => {
+          if (isJoining) return;
           if (!net) { global.GameState?.showToast?.('⚠️ Online P2P only active inside Nammu Hub.'); return; }
-          if (isJoined) net.leaveRoom().then(() => self.rebuildTopFrame());
-          else net.joinRoom(self._joinRoomCode).then(() => self.rebuildTopFrame()).catch(() => {});
+          if (isJoined) {
+            net.leaveRoom().then(() => self.rebuildTopFrame());
+          } else if (code.length < 4 && global.GameSettingsRenamePopup?.openRoomCode) {
+            global.GameSettingsRenamePopup.openRoomCode('', (enteredCode) => {
+              if (!enteredCode) return;
+              self._joinRoomCode = enteredCode;
+              self._connectWithRoomCode(enteredCode);
+            }, { originNode: 'pod-preset-join-code-entry' });
+          } else {
+            self._connectWithRoomCode(self._joinRoomCode);
+          }
         }
       }
     ];

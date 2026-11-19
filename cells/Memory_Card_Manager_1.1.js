@@ -95,10 +95,58 @@
     };
   };
 
+  proto.findSaveByRoomCode = function(roomCode) {
+    const code = String(roomCode || '').trim().toUpperCase();
+    if (!code) return null;
+    return this.listSaves().find(s => String(s?.roomCode || '').toUpperCase() === code) || null;
+  };
+
+  proto.saveJoinedLobbyMatch = function(info = {}) {
+    const code = String(info.roomCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+    if (!code) return null;
+    const saves = this.getSavesMap();
+    const existing = Object.values(saves).find(s => String(s?.roomCode || '').toUpperCase() === code) || null;
+    const id = existing?.id || `match_${code}`;
+    const snap = Object.assign({}, existing || {}, {
+      id,
+      game: 'puzzle',
+      matchName: info.matchName || existing?.matchName || `Match ${code}`,
+      roomCode: code,
+      roleBadge: 'Player',
+      lobbyMode: 'Online',
+      updatedAt: Date.now(),
+      round: existing?.round || 1,
+      maxRounds: info.matchConfig?.rounds ?? existing?.maxRounds ?? 144,
+      isEndless: !!(info.matchConfig?.isEndless ?? existing?.isEndless),
+      boardRadius: info.matchConfig?.boardRadius || existing?.boardRadius || 6,
+      playerCount: info.playerCount || existing?.playerCount || 2,
+      presetName: info.presetName || existing?.presetName || 'Meditate',
+      matchConfig: info.matchConfig ? deepClone(info.matchConfig) : (existing?.matchConfig || null),
+      boardTiles: existing?.boardTiles || [],
+      isLobbyPlaceholder: !existing?.boardTiles?.length
+    });
+
+    saves[id] = snap;
+    const ordered = Object.values(saves).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const trimmed = {};
+    ordered.slice(0, MAX_SAVES).forEach(s => { trimmed[s.id] = s; });
+    localStorage.setItem(KEYS.SAVES, JSON.stringify(trimmed));
+    this.markUnsaved();
+    return snap;
+  };
+
   proto.saveActivePuzzleMatch = function(matchId = null, opts = {}) {
     const snap = this.capturePuzzleState(matchId, opts);
     if (!snap) return null;
     const saves = this.getSavesMap();
+    const code = String(snap.roomCode || '').toUpperCase();
+    if (code) {
+      Object.keys(saves).forEach((k) => {
+        if (k !== snap.id && String(saves[k]?.roomCode || '').toUpperCase() === code) {
+          delete saves[k];
+        }
+      });
+    }
     saves[snap.id] = snap;
 
     const ordered = Object.values(saves).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));

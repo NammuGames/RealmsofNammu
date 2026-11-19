@@ -339,6 +339,22 @@
       global.BoardRenderer?.render?.();
     }
 
+    popToRoot(options = {}) {
+      if (!this.active || this.isAnimating() || this.history.length <= 1) return;
+      while (this.history.length > 2) {
+        const mid = this.history.splice(1, 1)[0];
+        if (mid?.frame) {
+          mid.frame.visible = false;
+          this.containerNode.removeChild(mid.frame);
+        }
+      }
+      this.popColumn(options);
+      if (this.history[0]?.frame) {
+        this.history[0].frame.contentAlpha = 1.0;
+        this.buildScene(this.history[0].frame);
+      }
+    }
+
     buildScene(targetFrame = null) {
       const frame = targetFrame || this.getActiveFrame();
       if (!frame) return;

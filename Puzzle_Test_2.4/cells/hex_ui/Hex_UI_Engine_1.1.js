@@ -100,7 +100,11 @@
       return { x: (clientX - r.left) * sx, y: (clientY - r.top) * sy };
     };
 
+    const isSyntheticMouse = (e) => !!e?.sourceCapabilities?.firesTouchEvents || (performance.now() - (global.__LAST_CANVAS_TOUCH_MS || -9999) < 700);
+    const markTouch = () => { global.__LAST_CANVAS_TOUCH_MS = performance.now(); };
+
     this.canvas.addEventListener('mousemove', (e) => {
+      if (isSyntheticMouse(e)) return;
       const pos = getPos(e);
       let hit = null;
       if (global.GameSettingsRenamePopup?.isOpen?.() && global.GameSettingsRenamePopup.frameNode) {
@@ -125,6 +129,7 @@
     });
 
     this.canvas.addEventListener('mousedown', (e) => {
+      if (isSyntheticMouse(e)) return;
       const pos = getPos(e);
       if (global.GameSettingsRenamePopup?.isOpen?.() && global.GameSettingsRenamePopup.frameNode) {
         const frame = global.GameSettingsRenamePopup.frameNode;
@@ -151,6 +156,7 @@
     });
 
     this.canvas.addEventListener('touchstart', (e) => {
+      markTouch();
       const t = e.touches && e.touches[0];
       if (!t || e.touches.length !== 1) { clearTouchScroll(); return; }
       const pos = getPos(t);
@@ -191,6 +197,7 @@
     }, { passive: true });
 
     window.addEventListener('touchmove', (e) => {
+      if (e.target === this.canvas) markTouch();
       if (touchState.id === null || !touchState.list) return;
       const t = findTouch(e.touches, touchState.id);
       if (!t) return;
@@ -220,6 +227,7 @@
     }, { passive: false });
 
     window.addEventListener('mouseup', (e) => {
+      if (isSyntheticMouse(e)) return;
       if (this.pressedNode) {
         const pos = getPos(e);
         const wasInside = this.pressedNode.containsScreenPoint(pos.x, pos.y);
@@ -230,6 +238,10 @@
     });
 
     window.addEventListener('touchend', (e) => {
+      if (e.target === this.canvas) {
+        markTouch();
+        if (e.cancelable) e.preventDefault();
+      }
       const t = (touchState.id !== null) ? findTouch(e.changedTouches, touchState.id) : ((e.changedTouches && e.changedTouches[0]) || e);
       if (touchState.scrolling && t) {
         if (Math.abs(touchState.vy) > 60) {
@@ -248,9 +260,10 @@
         if (btn) btn.handlePointerUp(wasInside);
         this.pressedNode = null;
       }
-    }, { passive: true });
+    }, { passive: false });
 
-    window.addEventListener('touchcancel', () => {
+    window.addEventListener('touchcancel', (e) => {
+      if (e?.target === this.canvas) markTouch();
       clearTouchScroll();
       if (this.pressedNode) {
         const btn = this.pressedNode.getTrait('button');

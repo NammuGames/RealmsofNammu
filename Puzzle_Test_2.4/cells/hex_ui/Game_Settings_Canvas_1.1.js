@@ -36,20 +36,68 @@
     const list = this.config.presets || [];
     const activeIdx = Math.max(0, Math.min(list.length - 1, this.config.activePresetIndex || 0));
     const curPreset = list[activeIdx] || list[0] || { name: 'Meditate' };
+    const armedSave = this.getArmedSavedMatch ? this.getArmedSavedMatch() : null;
+    const mc = global.MemoryCardManager;
+    const net = global.NetworkP2PManager;
+    const isGuestWaiting = !!(net?.role === 'guest' && net?.isConnected?.());
+
+    const levelTitle = armedSave ? (armedSave.presetName || armedSave.matchConfig?.presetName || curPreset.name) : curPreset.name;
+    const lobbyState = armedSave
+      ? (armedSave.lobbyMode || 'Local')
+      : (net?.isConnected?.() ? 'Online' : (this.config.lobbyMode || 'Local'));
+    const matchTitle = armedSave ? (armedSave.matchName || 'Saved Match') : 'New Match';
+    const mcStatus = mc?.getSavedStatusLabel ? mc.getSavedStatusLabel() : 'Saved';
 
     this.renderColumn('Game Menu', false, [
       {
-        type: 'half_stepper', id: 'players', title: 'Number Of Players', color: '#10f000',
-        valText: `${this.config.playerCount} Player${this.config.playerCount > 1 ? 's' : ''}`,
-        onDelta: (d) => { self.config.playerCount = Math.max(1, Math.min(6, self.config.playerCount + d)); self.buildScene(); }
+        type: 'preset_name', id: 'menu-presets',
+        title: levelTitle,
+        categoryIndexText: 'Level',
+        color: armedSave ? '#953ffd' : '#10f000',
+        onClick: () => {
+          if (armedSave && typeof self.renderSavedMatchLevelView === 'function') {
+            self.pushColumn('Level (View Only)', () => self.renderSavedMatchLevelView(armedSave));
+          } else {
+            self.pushColumn('Presets', () => self.renderFusedPresetColumn());
+          }
+        }
       },
       {
-        type: 'base', id: 'menu-presets', title: 'Preset Selection', color: '#10f000',
-        onClick: () => self.pushColumn('Presets', () => self.renderFusedPresetColumn())
+        type: 'preset_name', id: 'single-multiplayer',
+        title: lobbyState,
+        categoryIndexText: 'Lobby',
+        color: (lobbyState === 'Online') ? '#3d6eff' : '#10f000',
+        isDoubleBorder: (lobbyState === 'Online'),
+        onClick: () => self.pushColumn('Lobby', () => self.renderMultiplayerColumn())
       },
       {
-        type: 'preset_name', id: 'begin-match', title: curPreset.name, categoryIndexText: 'Begin', color: '#10f000',
-        onClick: () => self.launchMatch()
+        type: 'preset_name', id: 'saved-matches',
+        title: matchTitle,
+        categoryIndexText: 'Matches',
+        color: armedSave ? '#ff8800' : '#10f000',
+        isDoubleBorder: !!armedSave,
+        onClick: () => self.pushColumn('Saved Matches', () => self.renderSavedMatchesColumn())
+      },
+      isGuestWaiting
+        ? {
+            type: 'base', id: 'begin-match-waiting',
+            title: 'Waiting for Host',
+            color: '#953ffd',
+            isReadOnly: true
+          }
+        : {
+            type: 'base', id: 'begin-match',
+            title: 'Begin Match',
+            color: '#10f000',
+            onClick: () => self.launchMatch()
+          },
+      {
+        type: 'preset_name', id: 'memory-card-btn',
+        title: 'Memory Card',
+        categoryIndexText: mcStatus,
+        color: (mcStatus === 'Saved') ? '#10f000' : '#ff8800',
+        isDoubleBorder: (mcStatus === 'Unsaved'),
+        onClick: () => self.pushColumn('Memory Card', () => self.renderMemoryCardColumn())
       }
     ]);
   };

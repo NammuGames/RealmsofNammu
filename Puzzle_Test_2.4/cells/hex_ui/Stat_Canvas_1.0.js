@@ -101,17 +101,20 @@
       global.BoardRenderer?.render?.();
     }
 
-    openForPlayerSelect(callback) {
+    openForPlayerSelect(callback, options = {}) {
       this.playerSelectCallback = callback;
+      this.playerSelectOptions = options || {};
       this.open(true);
     }
 
     close(silent = false, onDone = null) {
       if ((!this.active && !this.containerNode?.visible) || this.isAnimating()) return;
       const wasSelect = !!this.playerSelectCallback;
+      const selOpts = this.playerSelectOptions || {};
       const wasMimicHeal = !!(wasSelect && global.SpellCharge?.isMimicking && global.SpellCharge?.activeMimicSpell === 'heal');
       this.active = false;
       this.playerSelectCallback = null;
+      this.playerSelectOptions = null;
       this._prevScroll = 0; this._prevTarget = 0;
       const doCloseCleanup = () => {
         if (this.containerNode) {
@@ -124,6 +127,10 @@
         }
         global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
         global.BoardRenderer?.render?.();
+        if (wasSelect && selOpts.returnToPause && typeof onDone !== 'function') {
+          global.GameSettingsCanvas?.openInGamePause?.();
+          return;
+        }
         if (typeof onDone === 'function') onDone();
       };
       if (!silent) global.AudioSynth?.playClick?.();
@@ -137,7 +144,7 @@
       global.BoardRenderer?.render?.();
       if (wasMimicHeal) {
         global.SpellCharge?.returnToChargeSelection?.();
-      } else if (wasSelect) {
+      } else if (wasSelect && !selOpts.returnToPause) {
         global.UISidebarDeck?.openSpellbookColumn?.(false);
       }
     }

@@ -59,7 +59,21 @@
     });
     if (this.playerSelectCallback && global.HexTraits?.ButtonTrait) {
       const cb = this.playerSelectCallback;
-      podNode.addTrait(new global.HexTraits.ButtonTrait({ hoverGlowColor: '#10f000', soundClick: false, onClick: () => { this.playerSelectCallback = null; this.close(true); cb(player.id); } }));
+      const filterFn = this.playerSelectOptions?.isSelectable;
+      const isSelectable = (typeof filterFn === 'function') ? !!filterFn(player, playerIndex) : true;
+      if (isSelectable) {
+        podNode.addTrait(new global.HexTraits.ButtonTrait({
+          hoverGlowColor: '#10f000',
+          soundClick: false,
+          onClick: () => {
+            this.playerSelectCallback = null;
+            this.playerSelectOptions = null;
+            this.close(true, () => cb(player.id));
+          }
+        }));
+      } else {
+        podNode.setGhost(true);
+      }
     }
 
     // --- TOP ROW: 3 Stat Pairs (Player, Score, Average) ---

@@ -56,6 +56,9 @@
       pod.isSidebarButton = true;
       pod.addTrait(new traits.ButtonTrait({ onClick: item.onClick }));
     }
+    if (item.ghost) {
+      pod.setGhost(true);
+    }
     const bSize = (item.id === 'fused-preset-name-btn') ? (cfg.presetNameBtnTextSize ?? 52) : (cfg.baseBtnTextSize ?? 44);
     const bY = cfg.baseBtnTextY ?? 3;
     const hasUnderline = !!item.underline || (item.id === 'fused-preset-name-btn');

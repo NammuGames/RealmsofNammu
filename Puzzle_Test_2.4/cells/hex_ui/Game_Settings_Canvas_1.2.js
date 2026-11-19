@@ -321,14 +321,53 @@
   };
 
   Proto.launchMatch = function() {
+    const net = global.NetworkP2PManager;
+    const mc = global.MemoryCardManager;
+    if (net?.role === 'guest' && net?.isConnected?.()) {
+      global.GameState?.showToast?.('⏳ Waiting for Host to start the match...');
+      return;
+    }
+
+    // Resume an armed Saved Match (instead of starting a brand-new match)
+    const armed = this.getArmedSavedMatch ? this.getArmedSavedMatch() : null;
+    if (armed) {
+      this.isMatchActive = true;
+      const shouldHostOnline = !!(net && (armed.lobbyMode === 'Online' || armed.roleBadge === 'Host' || this.config.lobbyMode === 'Online'));
+      const resumeFlow = async () => {
+        if (shouldHostOnline && net.role !== 'host') {
+          try { await net.hostRoom(armed.roomCode || null, { matchName: armed.matchName }); } catch {}
+        }
+        mc?.restorePuzzleState?.(armed);
+        if (net?.role === 'host') {
+          net._assignDefaultSeats?.(armed.playerCount || global.GameState?.playerCount || 1);
+          setTimeout(() => net.syncFullState?.('MATCH_RESUME'), 250);
+        }
+        global.GameState?.showToast?.(`✦ Resumed "${armed.matchName || 'Saved Match'}"`);
+      };
+      resumeFlow();
+      return;
+    }
+
     const list = this.config.presets;
     const activeIdx = Math.max(0, Math.min((list?.length || 1) - 1, this.config.activePresetIndex || 0));
     const curPreset = (list && list[activeIdx]) || list?.[0] || {};
     const m = curPreset.match || (this.config.matchPresets ? (this.config.matchPresets[this.config.activeMatchPresetIndex] || this.config.matchPresets[0]) : {});
     const l = curPreset.luck || (this.config.luckPresets ? (this.config.luckPresets[this.config.activeLuckPresetIndex] || this.config.luckPresets[0]) : {});
     const b = curPreset.blight || (this.config.blightPresets ? (this.config.blightPresets[this.config.activeBlightPresetIndex] || this.config.blightPresets[0]) : {});
+
+    const isOnline = !!(net?.isConnected?.() || this.config.lobbyMode === 'Online');
+    const roomCode = net?.roomCode || (this.getPendingRoomCode ? this.getPendingRoomCode() : (mc?.generateUniqueRoomCode?.() || '4K9P'));
+    const matchName = this.getPendingMatchName ? this.getPendingMatchName() : `Match ${roomCode}`;
+    const roleBadge = isOnline ? 'Host' : 'Player';
+    const lobbyMode = isOnline ? 'Online' : 'Local';
+
     const matchConfig = {
       playerCount: this.config.playerCount,
+      presetName: curPreset.name || 'Meditate',
+      matchName,
+      roomCode,
+      roleBadge,
+      lobbyMode,
       boardRadius: m.boardRadius ?? 6,
       materialComposition: m.materialComposition || 'Even',
       luckComposition: m.luckComposition || 'Ether',
@@ -338,65 +377,30 @@
       luckPreset: l,
       blightPreset: b
     };
+
+    if (mc) mc.activeMatchId = `puzzle_${Date.now()}`;
+    this.config.pendingRoomCode = null;
+    this.config.pendingMatchName = null;
     this.isMatchActive = true;
-    this.close(() => {
-      if (global.GameState?.setMatchConfig) global.GameState.setMatchConfig(matchConfig);
-      global.GameState?.showToast?.(`✦ Match Launched! ${this.config.playerCount} Player(s) • Radius-${m.boardRadius ?? 6}`);
+
+    this.close(async () => {
+      if (isOnline && net && net.role !== 'host') {
+        try { await net.hostRoom(roomCode, { matchName }); } catch {}
+      }
+      if (global.GameState) {
+        global.GameState.matchName = matchName;
+        global.GameState.roomCode = roomCode;
+        global.GameState.roleBadge = roleBadge;
+        global.GameState.lobbyMode = lobbyMode;
+        if (global.GameState.setMatchConfig) global.GameState.setMatchConfig(matchConfig);
+      }
+      // Auto-save newly launched match to Saved Matches once startup settles
+      setTimeout(() => {
+        if (global.GameState?.matchStarted) {
+          mc?.saveActivePuzzleMatch?.(mc.activeMatchId, { matchName, roomCode, roleBadge, lobbyMode });
+        }
+      }, 1700);
+      global.GameState?.showToast?.(`✦ ${matchName} • ${this.config.playerCount} Player(s) • Radius-${m.boardRadius ?? 6}`);
     });
   };
-
-  Proto.quitToSetup = function() {
-    const state = global.GameState;
-    if (!state?.matchStarted) {
-      state?.clearToPreMatch?.();
-      this.isMatchActive = false;
-      this.openSetupMenu();
-      return;
-    }
-    this.close(() => {
-      state.inSigilStage = false;
-      state.activeMaterialMod = null;
-      state.inForesightMode = false;
-      state.inTeleportMode = false;
-      state.inChargeMode = false;
-      state.inShiftMode = false;
-      state.inArchMode = false;
-      state.inRitualMode = false;
-      state.inManifestMode = false;
-      state.inSpellOverflow = false;
-      state.hp = 0;
-      state.pendingHeal = 0;
-      state.activeDamageTiles = [];
-      global.MatchOrchestrator?.saveActivePlayerFromState?.(state);
-      const pName = state.getActivePlayer?.()?.name || `Player ${state.currentPlayerId || 1}`;
-      state.showToast(`💀 ${pName} vitality depleted (0 HP)!`);
-      if (global.TurnManager) {
-        global.TurnManager.isEndingTurn = true;
-        global.TurnManager.completeRoundAdvancement();
-      } else {
-        global.MatchOrchestrator?.triggerMatchEndSequence?.(state, false);
-      }
-    });
-  };
-
-  Proto.buildPauseScene = function() {
-    const activeP = global.GameState?.getActivePlayer?.()?.name || 'Player 1';
-    const curScore = global.GameState?.score || 0;
-    const curRound = global.GameState?.round || 1;
-    this.renderColumn('Game Paused', false, [
-      {
-        type: 'base', id: 'pause-match-info', title: `${activeP} • Round ${curRound} • Score: ${curScore}`,
-        isReadOnly: true
-      },
-      {
-        type: 'action', id: 'pause-resume', title: '▶ Resume Game', color: '#00ff88', isDoubleBorder: true,
-        onClick: () => this.close()
-      },
-      {
-        type: 'action', id: 'pause-quit', title: '✖ Quit To Menu', color: '#ff3333',
-        onClick: () => this.quitToSetup()
-      }
-    ]);
-  };
-
 })(window);

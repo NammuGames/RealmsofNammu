@@ -1,23 +1,223 @@
 /**
- * @fileoverview cells/Network_P2P_Manager_1.1.js - Live Sync Protocol, Spectator Locks & Drawer UI (Part 2/2)
- * @description Attaches message routing, live cursor/action replay, private-spectator board
- * locks, authoritative state sync hooks, and Tuning Drawer P2P UI onto NetworkP2PManagerClass.
+ * @fileoverview cells/Network_P2P_Manager_1.1.js - Lobby Lifecycle, Seat Roster & Pass Host (Part 2/3)
+ * @description Attaches Host/Join/Leave room lifecycle, multi-seat roster management, and
+ * 2-step Pass Host handoff onto NetworkP2PManagerClass.prototype.
  * Strictly adheres to the 500-line hard cap and underscore naming conventions.
  */
 
 (function(global) {
   'use strict';
 
-  const proto = global.NetworkP2PManagerClass?.prototype;
-  if (!proto) {
+  const Cls = global.NetworkP2PManagerClass;
+  const proto = Cls?.prototype;
+  if (!proto || !Cls._helpers) {
     console.error('[Network_P2P_Manager_1.1] Load Network_P2P_Manager_1.0.js first.');
     return;
   }
 
-  proto._broadcast = function(msg) {
-    this._publishRoom?.(msg, '*');
+  const { makeRoomCode, makePeerId } = Cls._helpers;
+
+  // ── HOST / JOIN / LEAVE LIFECYCLE ─────────────────────────────────────────
+  proto.stopSearch = function() {
+    this._joinSeq++;
+    if (this._searchRetryTimer) { clearTimeout(this._searchRetryTimer); this._searchRetryTimer = null; }
+    this._pendingJoinResolve = null;
+    this.searchingCode = '';
+    this.searchStatus = '';
   };
 
+  proto.hostRoom = async function(customCode = null, opts = {}) {
+    this.stopSearch();
+    await this._cleanupTransportOnly();
+    const code = (customCode || makeRoomCode(4)).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const localCount = Math.max(1, Math.min(6, opts.localPlayerCount || global.GameSettingsCanvas?.config?.playerCount || this.localPlayerCount || 1));
+    this.localPlayerCount = localCount;
+    this.hostLocalPlayerCount = localCount;
+    this.myPeerId = this.myPeerId || makePeerId();
+    this.searchStatus = 'Opening Room...';
+    this._notifyLobbyUpdate?.();
+
+    try {
+      this.transport = this._createTransport();
+      await this.transport.connect(code, { brokerIndex: 0, allowFailover: true });
+      this.role = 'host';
+      this.roomCode = code;
+      this.hostPeerId = this.myPeerId;
+      this.searchStatus = '';
+      this.matchName = opts.matchName || this.matchName || `Match ${code}`;
+      const prof = global.MemoryCardManager?.getProfile?.() || { name: 'Host' };
+      this.peerMeta.clear();
+      this.peerMeta.set(this.myPeerId, { name: prof.name || 'Host', seatIndex: 0, localPlayerCount: localCount });
+      this._rebuildSeatRoster();
+      this._startHeartbeat();
+      this._broadcastRoster();
+      this._updateDrawerUI?.();
+      this._notifyLobbyUpdate();
+      global.GameState?.showToast?.(`🌐 Hosting Room: ${code}`);
+      return { ok: true, roomCode: code, peerId: this.myPeerId };
+    } catch (err) {
+      this.role = 'offline';
+      this.searchStatus = `Host Error: ${err?.message || 'Relay Unavailable'}`;
+      this._notifyLobbyUpdate();
+      global.GameState?.showToast?.(`⚠️ Relay Host Error: ${err?.message || 'Unavailable'}`);
+      this._updateDrawerUI?.();
+      throw err;
+    }
+  };
+
+  proto.hostSavedMatch = async function(saveId = null) {
+    const mc = global.MemoryCardManager;
+    const saves = mc?.listSaves?.() || [];
+    const target = saveId ? saves.find(s => s.id === saveId) : saves[0];
+    if (!target) {
+      global.GameState?.showToast?.('⚠️ No saved match in localStorage to resume.');
+      return false;
+    }
+    if (global.HubGameLoader?.activeGameId !== 'puzzle') {
+      await global.HubGameLoader?.launchGame?.('puzzle');
+    }
+    await this.hostRoom(target.roomCode || null, { matchName: target.matchName });
+    mc.restorePuzzleState(target);
+    this._assignDefaultSeats(target.playerCount || global.GameState?.playerCount || 1);
+    global.GameState?.showToast?.(`🌐 Hosting "${target.matchName || this.roomCode}" (Code ${this.roomCode})`);
+    return true;
+  };
+
+  proto._onGuestConnectedToHost = function(hostPeerId) {
+    if (this.role !== 'guest' || !hostPeerId) return;
+    const firstJoin = !this.connections.has(hostPeerId);
+    this.hostPeerId = hostPeerId;
+    this.connections.set(hostPeerId, { peer: hostPeerId, open: true, lastSeen: Date.now() });
+    if (firstJoin) {
+      if (this._searchRetryTimer) { clearTimeout(this._searchRetryTimer); this._searchRetryTimer = null; }
+      this.searchingCode = '';
+      this.searchStatus = '';
+      this._startHeartbeat();
+      global.GameState?.showToast?.(`🌐 Joined Room: ${this.roomCode}`);
+      const done = this._pendingJoinResolve;
+      this._pendingJoinResolve = null;
+      if (typeof done === 'function') done({ ok: true, roomCode: this.roomCode, peerId: this.myPeerId });
+    }
+  };
+
+  proto.joinRoom = async function(roomCode, opts = {}) {
+    const code = (roomCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+    if (code.length < 4) {
+      global.GameState?.showToast?.('⚠️ Enter a valid 4-character Room Code.');
+      return false;
+    }
+    this.stopSearch();
+    const seq = this._joinSeq;
+    const keepSearching = !!opts.keepSearching;
+    const isStale = () => this._joinSeq !== seq || (keepSearching && this.searchingCode !== code);
+    this.localPlayerCount = Math.max(1, Math.min(6, opts.localPlayerCount || global.GameSettingsCanvas?.config?.playerCount || this.localPlayerCount || 1));
+    this.myPeerId = this.myPeerId || makePeerId();
+    this.searchingCode = code;
+    this.searchStatus = 'Connecting to Relay...';
+    this._notifyLobbyUpdate();
+
+    await this._cleanupTransportOnly();
+    if (isStale()) return false;
+
+    return new Promise(async (resolve, reject) => {
+      this._pendingJoinResolve = resolve;
+      let brokerIdx = 0;
+      let helloTries = 0;
+
+      const connectAndProbe = async () => {
+        if (isStale() || this.isConnected()) return;
+        try {
+          this.transport = this._createTransport();
+          const info = await this.transport.connect(code, { brokerIndex: brokerIdx, allowFailover: true });
+          if (isStale()) { this._cleanupTransportOnly(); return; }
+          brokerIdx = info?.brokerIndex ?? brokerIdx;
+          this.role = 'guest';
+          this.roomCode = code;
+          this.searchStatus = 'Waiting for Host...';
+          this._notifyLobbyUpdate();
+          helloTries = 0;
+          this._sendHello();
+          scheduleProbe();
+        } catch (err) {
+          if (isStale()) return;
+          if (keepSearching) {
+            this.searchStatus = 'Relay Busy — Retrying...';
+            this._notifyLobbyUpdate();
+            this._searchRetryTimer = setTimeout(() => { brokerIdx = (brokerIdx + 1) % 2; connectAndProbe(); }, 2800);
+          } else {
+            this.stopSearch();
+            this.role = 'offline';
+            global.GameState?.showToast?.(`⚠️ Could not reach Relay (${err?.message || 'Error'})`);
+            this._updateDrawerUI?.();
+            reject(err);
+          }
+        }
+      };
+
+      const scheduleProbe = () => {
+        if (this._searchRetryTimer) clearTimeout(this._searchRetryTimer);
+        this._searchRetryTimer = setTimeout(async () => {
+          if (isStale() || this.isConnected()) return;
+          helloTries++;
+          if (!keepSearching && helloTries >= 5) {
+            this.stopSearch();
+            await this._cleanupTransportOnly();
+            this.role = 'offline';
+            global.GameState?.showToast?.(`⚠️ Could not find Room ${code} (timed out).`);
+            this._updateDrawerUI?.();
+            this._notifyLobbyUpdate();
+            reject(new Error('timeout'));
+            return;
+          }
+          if (keepSearching && helloTries >= 4 && !this.transport?.customRelayUrl) {
+            brokerIdx = (brokerIdx + 1) % (this.transport?.brokers?.length || 2);
+            this.searchStatus = 'Checking Backup Relay...';
+            this._notifyLobbyUpdate();
+            await this._cleanupTransportOnly();
+            connectAndProbe();
+            return;
+          }
+          this.searchStatus = 'Waiting for Host...';
+          this._notifyLobbyUpdate();
+          this._sendHello();
+          scheduleProbe();
+        }, 2500);
+      };
+
+      connectAndProbe();
+    });
+  };
+
+  proto.leaveRoom = async function() {
+    this.stopSearch();
+    if (this.transport?.connected && this.role !== 'offline') {
+      await this._publishRoom({ type: 'GOODBYE' });
+    }
+    await this._cleanupTransportOnly();
+    this.role = 'offline';
+    this.roomCode = '';
+    this.hostPeerId = null;
+    this.seatOwners = [];
+    this.roomSeats = [];
+    this.peerMeta.clear();
+    this.pendingHostOfferToPeerId = null;
+    this.pendingHostOfferForMe = false;
+    this._updateDrawerUI?.();
+    this._notifyLobbyUpdate();
+    global.GameState?.showToast?.('🔌 Disconnected from Online Room');
+  };
+
+  proto.closeRoomAndSave = async function() {
+    if (global.GameState?.matchStarted) {
+      global.MemoryCardManager?.saveActivePuzzleMatch?.();
+    }
+    if (this.role === 'host' && this.transport?.connected) {
+      await this._publishRoom({ type: 'ROOM_CLOSING' });
+    }
+    await this.leaveRoom();
+  };
+
+  // ── SEAT ROSTER & PASS HOST ───────────────────────────────────────────────
   proto._assignDefaultSeats = function(playerCount = 6) {
     const ids = [this.myPeerId, ...Array.from(this.connections.keys())].filter(Boolean);
     for (let i = 0; i < Math.max(playerCount, ids.length); i++) {
@@ -45,14 +245,7 @@
     for (let i = 0; i < hostCount; i++) {
       const idx = seats.length;
       owners.push(this.myPeerId);
-      seats.push({
-        seatIndex: idx,
-        playerNum: idx + 1,
-        name: `Player ${idx + 1}`,
-        deviceName: hostMeta.name || 'Host',
-        ownerPeerId: this.myPeerId,
-        isHost: true
-      });
+      seats.push({ seatIndex: idx, playerNum: idx + 1, name: `Player ${idx + 1}`, deviceName: hostMeta.name || 'Host', ownerPeerId: this.myPeerId, isHost: true });
     }
 
     this.connections.forEach((_, pid) => {
@@ -64,14 +257,7 @@
       for (let k = 0; k < cnt; k++) {
         const idx = seats.length;
         owners.push(pid);
-        seats.push({
-          seatIndex: idx,
-          playerNum: idx + 1,
-          name: `Player ${idx + 1}`,
-          deviceName: meta.name || `Guest`,
-          ownerPeerId: pid,
-          isHost: false
-        });
+        seats.push({ seatIndex: idx, playerNum: idx + 1, name: `Player ${idx + 1}`, deviceName: meta.name || 'Guest', ownerPeerId: pid, isHost: false });
       }
     });
 
@@ -88,14 +274,7 @@
     const cnt = Math.max(1, Math.min(6, this.localPlayerCount || global.GameSettingsCanvas?.config?.playerCount || 1));
     const out = [];
     for (let i = 0; i < cnt; i++) {
-      out.push({
-        seatIndex: i,
-        playerNum: i + 1,
-        name: `Player ${i + 1}`,
-        deviceName: 'You (Local)',
-        ownerPeerId: this.myPeerId || 'local',
-        isHost: false
-      });
+      out.push({ seatIndex: i, playerNum: i + 1, name: `Player ${i + 1}`, deviceName: 'You (Local)', ownerPeerId: this.myPeerId || 'local', isHost: false });
     }
     return out;
   };
@@ -109,289 +288,61 @@
       this._broadcastRoster();
       this._notifyLobbyUpdate();
     } else if (this.role === 'guest' && this.isConnected()) {
-      this._sendHello?.();
+      this._sendHello();
       this._notifyLobbyUpdate();
     }
   };
 
-  // ── MESSAGE DISPATCH & REMOTE REPLAY ──────────────────────────────────────
-  proto._handleMessage = function(fromPeerId, msg) {
-    if (!msg || !msg.type) return;
-
-    if (msg.type === 'HELLO' && this.role === 'host') {
-      const seatCount = Math.max(1, Math.min(6, msg.localPlayerCount || 1));
-      const wasConnected = this.connections.has(fromPeerId);
-      this.connections.set(fromPeerId, { peer: fromPeerId, open: true, lastSeen: Date.now() });
-      const existing = this.peerMeta.get(fromPeerId);
-      const seatIdx = existing?.seatIndex ?? this.seatOwners.length;
-      this.peerMeta.set(fromPeerId, { name: msg.name || `Player ${seatIdx + 1}`, seatIndex: seatIdx, localPlayerCount: seatCount });
-      this._rebuildSeatRoster();
-      this._broadcastRoster();
-      if (!wasConnected && global.GameState?.matchStarted) {
-        const snap = global.MemoryCardManager?.capturePuzzleState?.();
-        if (snap) this._publishRoom?.({ type: 'STATE_SYNC', reason: 'JOIN', snap }, fromPeerId);
-      }
-      this._updateDrawerUI();
-      this._notifyLobbyUpdate();
-      return;
-    }
-
-    if (msg.type === 'ROOM_ROSTER') {
-      if (this.role === 'guest') {
-        this._onGuestConnectedToHost?.(msg.hostPeerId || fromPeerId);
-        const listed = Array.isArray(msg.seatOwners) && msg.seatOwners.includes(this.myPeerId);
-        if (!listed) this._sendHello?.();
-      }
-      this.roomCode = msg.roomCode || this.roomCode;
-      if (msg.matchName) this.matchName = msg.matchName;
-      if (msg.presetName) this.hostPresetName = msg.presetName;
-      if (typeof msg.playerCount === 'number') this.hostPlayerCount = msg.playerCount;
-      if (msg.matchConfig) this.hostMatchConfig = msg.matchConfig;
-      this.hostPeerId = msg.hostPeerId || this.hostPeerId;
-      this.seatOwners = msg.seatOwners || [];
-      if (Array.isArray(msg.seats)) this.roomSeats = msg.seats;
-      if (Array.isArray(msg.peers)) this.peerMeta = new Map(msg.peers);
-      if (this.role === 'guest' && this.roomCode) {
-        global.MemoryCardManager?.saveJoinedLobbyMatch?.({
-          roomCode: this.roomCode,
-          matchName: this.matchName,
-          presetName: this.hostPresetName,
-          playerCount: this.hostPlayerCount,
-          matchConfig: this.hostMatchConfig
-        });
-      }
-      this._updateDrawerUI();
-      this._notifyLobbyUpdate();
-      return;
-    }
-
-    if (msg.type === 'HOST_OFFER') {
-      this.pendingHostOfferForMe = (msg.targetPeerId === this.myPeerId);
-      if (this.pendingHostOfferForMe) {
-        global.GameState?.showToast?.('👑 Host offered to you! Open Pause → Receive Host.');
-      }
-      this._updateDrawerUI();
-      return;
-    }
-
-    if (msg.type === 'HOST_ACCEPT' && this.role === 'host') {
-      if (!this.pendingHostOfferToPeerId || this.pendingHostOfferToPeerId === fromPeerId) {
-        this.passHost(fromPeerId);
-      }
-      return;
-    }
-
-    if (msg.type === 'ROOM_CLOSING') {
-      global.GameState?.showToast?.('💾 Host saved and closed the room.');
-      this.leaveRoom();
-      return;
-    }
-
-    if (msg.type === 'PLAYER_FORFEIT' && typeof msg.seatIndex === 'number') {
-      this._applyingRemote = true;
-      try { global.GameSettingsCanvas?.forfeitPlayerByIndex?.(msg.seatIndex, { fromRemote: true }); }
-      finally { this._applyingRemote = false; }
-      return;
-    }
-
-    if (msg.type === 'HOST_HANDOFF') {
-      this._acceptHostHandoff(msg);
-      return;
-    }
-
-    if (msg.type === 'CURSOR_STATE') {
-      if (!this.turnOnlySync) this._applyCursorState(msg);
-      return;
-    }
-
-    if (msg.type === 'ACTION') {
-      if (!this.turnOnlySync) this._applyRemoteAction(msg);
-      return;
-    }
-
-    if (msg.type === 'STATE_SYNC' && msg.snap) {
-      this._applyRemoteStateSync(msg.snap);
-    }
-  };
-
-  proto._emit = function(type, payload = {}) {
-    if (!this.isConnected() || this._applyingRemote) return;
-    this._publishRoom?.({ type, sender: this.myPeerId, ...payload }, '*');
-  };
-
-  proto.broadcastCursorThrottled = function() {
-    if (this.turnOnlySync) return;
-    const now = performance.now();
-    if (now - this._lastCursorEmitMs < 65) return;
-    this._lastCursorEmitMs = now;
-    const g = global.GameState;
-    if (!g || !g.matchStarted) return;
-    this._emit('CURSOR_STATE', {
-      cursor: g.placementCursor, rot: g.selectedRotation,
-      idx: g.selectedTrayIndex, sel: g.isMaterialSelected, mod: g.activeMaterialMod
-    });
-  };
-
-  proto.syncFullState = function(reason = 'TURN') {
-    if (!this.isConnected() || this._applyingRemote) return;
-    const snap = global.MemoryCardManager?.saveActivePuzzleMatch?.();
-    if (snap) this._emit('STATE_SYNC', { reason, snap });
-  };
-
-  proto._applyCursorState = function(msg) {
-    const g = global.GameState;
-    if (!g || !g.matchStarted) return;
-    this._applyingRemote = true;
-    try {
-      if (msg.cursor) g.placementCursor = { q: msg.cursor.q, r: msg.cursor.r };
-      if (typeof msg.rot === 'number') g.selectedRotation = msg.rot;
-      if (typeof msg.idx === 'number') g.selectedTrayIndex = msg.idx;
-      if (typeof msg.sel === 'boolean') g.isMaterialSelected = msg.sel;
-      if (msg.mod !== undefined) g.activeMaterialMod = msg.mod;
-      g.syncUI?.();
-      global.BoardRenderer?.render?.();
-    } finally { this._applyingRemote = false; }
-  };
-
-  proto._applyRemoteAction = function(msg) {
-    const g = global.GameState;
-    if (!g) return;
-    this._applyingRemote = true;
-    try {
-      if (msg.op === 'MOVE' && msg.dir) g.moveDirection?.(msg.dir);
-      else if (msg.op === 'ROTATE' && msg.dir) g.rotatePiece?.(msg.dir);
-      else if (msg.op === 'CLICK' && typeof msg.sx === 'number') global.InputController?.handleBoardClick?.(msg.sx, msg.sy);
-      else if (msg.op === 'PLACE') g.placeActiveMaterial?.();
-      else if (msg.op === 'CONFIRM') g.confirmPlacementAndExit?.();
-      else if (msg.op === 'UNDO') global.UndoManager?.undoLastAction?.();
-      else if (msg.op === 'END_TURN') global.TurnManager?.endTurn?.();
-      global.BoardRenderer?.render?.();
-    } finally { this._applyingRemote = false; }
-  };
-
-  proto._applyRemoteStateSync = async function(snap) {
-    if (global.HubGameLoader?.activeGameId !== 'puzzle') {
-      await global.HubGameLoader?.launchGame?.('puzzle');
-    }
-    this._applyingRemote = true;
-    try {
-      if (global.RoomStatCanvas?.isOpen?.()) {
-        global.RoomStatCanvas.close({ returnToMenu: false, immediate: true, silent: true });
-      }
-      global.MemoryCardManager?.restorePuzzleState?.(snap);
-      global.MemoryCardManager?.saveActivePuzzleMatch?.(snap.id);
-      this._updateDrawerUI();
-    } finally { this._applyingRemote = false; }
-  };
-
-  // ── PUZZLE BOARD LOCK & LIVE STREAM HOOKS ─────────────────────────────────
-  proto.hookPuzzleNetwork = function() {
-    if (this._puzzleHooked) return;
-    this._puzzleHooked = true;
-    const self = this;
-
-    const guardTurn = (fn) => function(...args) {
-      if (!self._applyingRemote && self.isConnected() && !self.isLocalPlayersTurn()) {
-        global.AudioSynth?.playCancel?.();
-        global.GameState?.showToast?.('👀 Spectating — board locked until your turn');
-        return false;
-      }
-      return fn.apply(this, args);
+  proto._buildRosterPayload = function() {
+    const gsc = global.GameSettingsCanvas;
+    const wp = gsc?.getActiveWorkingPreset?.();
+    const seats = this.getRoomSeats() || [];
+    const playerCount = global.GameState?.matchStarted ? (global.GameState.playerCount || 1) : Math.max(1, seats.length);
+    return {
+      type: 'ROOM_ROSTER',
+      roomCode: this.roomCode,
+      matchName: this.matchName || global.GameState?.matchName || '',
+      presetName: wp?.name || global.GameState?.matchConfig?.presetName || 'Meditate',
+      playerCount,
+      matchConfig: wp?.match ? { ...wp.match, presetName: wp.name } : null,
+      hostPeerId: this.hostPeerId,
+      seatOwners: this.seatOwners,
+      seats,
+      peers: Array.from(this.peerMeta.entries())
     };
-
-    const g = global.GameState;
-    if (g) {
-      ['moveDirection', 'rotatePiece', 'placeActiveMaterial', 'confirmPlacementAndExit'].forEach((m) => {
-        if (typeof g[m] !== 'function') return;
-        const orig = g[m];
-        g[m] = guardTurn(function(...args) {
-          const res = orig.apply(this, args);
-          if (!self._applyingRemote && self.isConnected() && !self.turnOnlySync) {
-            if (m === 'moveDirection') self._emit('ACTION', { op: 'MOVE', dir: args[0] });
-            else if (m === 'rotatePiece') self._emit('ACTION', { op: 'ROTATE', dir: args[0] });
-            else if (m === 'placeActiveMaterial') { self._emit('ACTION', { op: 'PLACE' }); self.syncFullState('PLACE'); }
-            else if (m === 'confirmPlacementAndExit') { self._emit('ACTION', { op: 'CONFIRM' }); self.syncFullState('CONFIRM'); }
-            self.broadcastCursorThrottled();
-          }
-          return res;
-        });
-      });
-    }
-
-    if (global.InputController?.handleBoardClick) {
-      const origClick = global.InputController.handleBoardClick;
-      global.InputController.handleBoardClick = guardTurn(function(sx, sy) {
-        const res = origClick.call(this, sx, sy);
-        if (!self._applyingRemote && self.isConnected() && !self.turnOnlySync) {
-          self._emit('ACTION', { op: 'CLICK', sx, sy });
-          self.broadcastCursorThrottled();
-        }
-        return res;
-      });
-    }
-
-    if (global.SpellManager?.castSpell) {
-      global.SpellManager.castSpell = guardTurn(global.SpellManager.castSpell);
-    }
-
-    if (global.UndoManager?.undoLastAction) {
-      const origUndo = global.UndoManager.undoLastAction;
-      global.UndoManager.undoLastAction = guardTurn(function(...args) {
-        const res = origUndo.apply(this, args);
-        if (!self._applyingRemote && self.isConnected() && res !== false && !self.turnOnlySync) {
-          self._emit('ACTION', { op: 'UNDO' });
-          self.syncFullState('UNDO');
-        }
-        return res;
-      });
-    }
-
-    if (global.TurnManager?.endTurn) {
-      const origEnd = global.TurnManager.endTurn;
-      global.TurnManager.endTurn = guardTurn(function(...args) {
-        const res = origEnd.apply(this, args);
-        if (!self._applyingRemote && self.isConnected() && res !== false && !self.turnOnlySync) {
-          self._emit('ACTION', { op: 'END_TURN' });
-        }
-        return res;
-      });
-    }
-
-    if (global.TurnManager?.completeRoundAdvancement) {
-      const origComplete = global.TurnManager.completeRoundAdvancement;
-      global.TurnManager.completeRoundAdvancement = function(...args) {
-        const res = origComplete.apply(this, args);
-        const curIdx = global.GameState?.activePlayerIndex || 0;
-        if (self.isSeatLocal(curIdx)) self.lastLocalActivePlayerIndex = curIdx;
-        self._updateDrawerUI();
-        return res;
-      };
-    }
-
-    if (global.MatchOrchestrator?.initMatch) {
-      const origInit = global.MatchOrchestrator.initMatch;
-      global.MatchOrchestrator.initMatch = function(state, config) {
-        const res = origInit.call(this, state, config);
-        if (self.role === 'host') {
-          self._assignDefaultSeats(config?.playerCount || 1);
-          setTimeout(() => self.syncFullState('MATCH_START'), 1600);
-        }
-        return res;
-      };
-    }
   };
 
-  /** Invoked at the end of TurnManager Phase E (after tray refill & piece spawn state are finalized). */
-  proto.onTurnAdvancementComplete = function() {
-    const curIdx = global.GameState?.activePlayerIndex || 0;
-    if (this.isSeatLocal(curIdx)) this.lastLocalActivePlayerIndex = curIdx;
-    if (!this._applyingRemote && this.isConnected()) {
-      this.syncFullState('TURN_END');
-    }
-    this._updateDrawerUI();
+  proto._sendRosterTo = function(targetPeerId) {
+    this._publishRoom(this._buildRosterPayload(), targetPeerId || '*');
   };
 
-  /** Transfers live Host authority to another connected peer seamlessly. */
+  proto._broadcastRoster = function() {
+    this._publishRoom(this._buildRosterPayload(), '*');
+  };
+
+  proto.offerHostToPlayer = function(playerId) {
+    if (this.role !== 'host') return false;
+    const targetPeerId = this.seatOwners[(playerId || 1) - 1];
+    if (!targetPeerId || targetPeerId === this.myPeerId || !this.connections.has(targetPeerId)) {
+      global.GameState?.showToast?.('⚠️ That player is not currently connected online.');
+      return false;
+    }
+    this.pendingHostOfferToPeerId = targetPeerId;
+    this._publishRoom({ type: 'HOST_OFFER', targetPeerId, targetPlayerId: playerId, fromHostPeerId: this.myPeerId }, targetPeerId);
+    global.GameState?.showToast?.(`👑 Offered Host to Player ${playerId}`);
+    this._updateDrawerUI?.();
+    return true;
+  };
+
+  proto.acceptHostOffer = function() {
+    if (this.role !== 'guest' || !this.pendingHostOfferForMe) return false;
+    this.pendingHostOfferForMe = false;
+    this._publishRoom({ type: 'HOST_ACCEPT', peerId: this.myPeerId }, this.hostPeerId || '*');
+    global.GameState?.showToast?.('🔄 Accepting Host role...');
+    this._updateDrawerUI?.();
+    return true;
+  };
+
   proto.passHost = function(targetPeerId = null) {
     if (this.role !== 'host') return false;
     const candidates = Array.from(this.connections.keys());
@@ -401,7 +352,6 @@
       return false;
     }
     this.pendingHostOfferToPeerId = null;
-
     const snap = global.MemoryCardManager?.saveActivePuzzleMatch?.() || null;
     const payload = {
       type: 'HOST_HANDOFF',
@@ -442,41 +392,6 @@
       global.GameState?.showToast?.('🔄 Host transferred smoothly');
     }
     this._updateDrawerUI?.();
-    this._notifyLobbyUpdate?.();
+    this._notifyLobbyUpdate();
   };
-
-  // ── TUNING DRAWER P2P CONTROLS ────────────────────────────────────────────
-  proto._wireDrawerUI = function() {
-    const d = document;
-    d.getElementById('btn-p2p-host')?.addEventListener('click', () => this.hostRoom());
-    d.getElementById('btn-p2p-host-saved')?.addEventListener('click', () => this.hostSavedMatch());
-    d.getElementById('btn-p2p-join')?.addEventListener('click', () => {
-      const val = d.getElementById('input-p2p-room-code')?.value || '';
-      this.joinRoom(val);
-    });
-    d.getElementById('btn-p2p-pass-host')?.addEventListener('click', () => this.passHost());
-    d.getElementById('btn-p2p-leave')?.addEventListener('click', () => this.leaveRoom());
-  };
-
-  proto._updateDrawerUI = function() {
-    const statusEl = document.getElementById('p2p-status-box');
-    if (statusEl) {
-      if (this.role === 'offline') {
-        statusEl.textContent = 'Status: Offline (Local Mode)';
-      } else {
-        const turnState = this.isLocalPlayersTurn() ? 'YOUR TURN' : 'SPECTATING (Locked)';
-        statusEl.textContent = `Role: ${this.role.toUpperCase()} | Room: ${this.roomCode}\nPeers: ${this.connections.size} | ${turnState}`;
-      }
-    }
-    const gsc = global.GameSettingsCanvas;
-    const topTitle = gsc?.history?.length ? gsc.history[gsc.history.length - 1]?.title : '';
-    if (gsc?.active && (gsc.mode === 'pause' || !topTitle || topTitle === 'Root' || topTitle === 'Lobby' || topTitle === 'Host' || topTitle === 'Join')) {
-      gsc.rebuildTopFrame?.();
-    }
-  };
-
-  const instance = new global.NetworkP2PManagerClass();
-  global.NetworkP2PManager = instance;
-  global.ROLL_CALL = global.ROLL_CALL || new Map();
-  global.ROLL_CALL.set('Network_P2P_Manager', instance);
 })(typeof window !== 'undefined' ? window : this);

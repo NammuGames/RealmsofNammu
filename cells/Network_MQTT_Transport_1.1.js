@@ -1,167 +1,25 @@
 /**
- * @fileoverview cells/Network_MQTT_Transport.js - Zero-Dependency Encrypted MQTT-over-WSS Relay
- * @description Implements a minimal MQTT 3.1.1 over Secure WebSocket (wss://) client with
- * SHA-256 hashed room topics, AES-256-GCM payload encryption (window.crypto.subtle),
- * public broker failover (EMQX -> HiveMQ), and optional custom WSS relay hook.
+ * @fileoverview cells/Network_MQTT_Transport_1.1.js - Stateful WSS Client, Failover & Outbound Queue (Part 2/2)
+ * @description Implements NetworkMQTTTransportClass on top of NetworkMQTTCodec: broker failover
+ * (EMQX -> HiveMQ), optional custom WSS relay hook, outbound buffering, ping keepalive, and sticky reconnect.
  * Strictly adheres to the 500-line hard cap and underscore naming conventions.
  */
 
 (function(global) {
   'use strict';
 
-  const DEFAULT_BROKERS = [
-    'wss://broker.emqx.io:8084/mqtt',
-    'wss://broker.hivemq.com:8884/mqtt'
-  ];
-  const ENC = new TextEncoder();
-  const DEC = new TextDecoder();
-
-  function toBase64(bytes) {
-    let bin = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-    }
-    return btoa(bin);
+  const codec = global.NetworkMQTTCodec;
+  if (!codec) {
+    console.error('[Network_MQTT_Transport_1.1] Load Network_MQTT_Transport_1.0.js first.');
+    return;
   }
 
-  function fromBase64(str) {
-    const bin = atob(str);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  }
+  const {
+    DEFAULT_BROKERS, ENC, DEC,
+    deriveRoomCrypto, sealPacket, openPacket,
+    concatBytes, buildConnectPacket, buildSubscribePacket, buildPublishPacket, makeClientId
+  } = codec;
 
-  function hexFromBytes(bytes, maxChars = 24) {
-    let s = '';
-    for (let i = 0; i < bytes.length && s.length < maxChars; i++) {
-      s += bytes[i].toString(16).padStart(2, '0');
-    }
-    return s.slice(0, maxChars);
-  }
-
-  function fallbackHashHex(str) {
-    let h1 = 0x811c9dc5, h2 = 0x9e3779b9;
-    for (let i = 0; i < str.length; i++) {
-      const c = str.charCodeAt(i);
-      h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
-      h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b) >>> 0;
-    }
-    return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
-  }
-
-  async function deriveRoomCrypto(roomCode) {
-    const clean = String(roomCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const subtle = global.crypto?.subtle;
-    if (subtle) {
-      const tHash = new Uint8Array(await subtle.digest('SHA-256', ENC.encode(`nammu-v1-topic::${clean}`)));
-      const kHash = await subtle.digest('SHA-256', ENC.encode(`nammu-v1-aeskey::${clean}`));
-      const key = await subtle.importKey('raw', kHash, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
-      return { topic: `nammu/v1/${hexFromBytes(tHash, 24)}`, key, encrypted: true };
-    }
-    // Fallback only for non-secure local file:// previews where crypto.subtle is unavailable
-    return { topic: `nammu/v1/${fallbackHashHex('nammu-v1-topic::' + clean)}`, key: null, encrypted: false };
-  }
-
-  async function sealPacket(cryptoCtx, payloadObj) {
-    const jsonStr = JSON.stringify(payloadObj);
-    if (!cryptoCtx?.key || !global.crypto?.subtle) {
-      return JSON.stringify({ v: 0, p: jsonStr });
-    }
-    const iv = global.crypto.getRandomValues(new Uint8Array(12));
-    const ctBuf = await global.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cryptoCtx.key, ENC.encode(jsonStr));
-    return JSON.stringify({ v: 1, iv: toBase64(iv), d: toBase64(new Uint8Array(ctBuf)) });
-  }
-
-  async function openPacket(cryptoCtx, rawStr) {
-    try {
-      const env = JSON.parse(rawStr);
-      if (!env || typeof env !== 'object') return null;
-      if (env.v === 1 && cryptoCtx?.key && global.crypto?.subtle && env.iv && env.d) {
-        const plainBuf = await global.crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv: fromBase64(env.iv) },
-          cryptoCtx.key,
-          fromBase64(env.d)
-        );
-        return JSON.parse(DEC.decode(plainBuf));
-      }
-      if (env.v === 0 && !cryptoCtx?.encrypted && typeof env.p === 'string') {
-        return JSON.parse(env.p);
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  // ── MINIMAL MQTT 3.1.1 BINARY CODEC ─────────────────────────────────────────
-  function encodeVarLen(n) {
-    const out = [];
-    do {
-      let b = n % 128;
-      n = Math.floor(n / 128);
-      if (n > 0) b |= 0x80;
-      out.push(b);
-    } while (n > 0);
-    return out;
-  }
-
-  function encodeUtf8Str(str) {
-    const bytes = ENC.encode(str);
-    const out = new Uint8Array(2 + bytes.length);
-    out[0] = (bytes.length >> 8) & 0xff;
-    out[1] = bytes.length & 0xff;
-    out.set(bytes, 2);
-    return out;
-  }
-
-  function concatBytes(parts) {
-    let len = 0;
-    for (let i = 0; i < parts.length; i++) len += parts[i].length;
-    const out = new Uint8Array(len);
-    let off = 0;
-    for (let i = 0; i < parts.length; i++) {
-      out.set(parts[i], off);
-      off += parts[i].length;
-    }
-    return out;
-  }
-
-  function buildConnectPacket(clientId, keepAliveSec = 45) {
-    const varHdr = new Uint8Array([
-      0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, // "MQTT"
-      0x04,                               // Protocol level 4 (3.1.1)
-      0x02,                               // Clean Session
-      (keepAliveSec >> 8) & 0xff, keepAliveSec & 0xff
-    ]);
-    const payload = encodeUtf8Str(clientId);
-    const remLen = encodeVarLen(varHdr.length + payload.length);
-    return concatBytes([new Uint8Array([0x10, ...remLen]), varHdr, payload]);
-  }
-
-  function buildSubscribePacket(packetId, topic) {
-    const varHdr = new Uint8Array([(packetId >> 8) & 0xff, packetId & 0xff]);
-    const tBytes = encodeUtf8Str(topic);
-    const qos = new Uint8Array([0x00]);
-    const remLen = encodeVarLen(varHdr.length + tBytes.length + 1);
-    return concatBytes([new Uint8Array([0x82, ...remLen]), varHdr, tBytes, qos]);
-  }
-
-  function buildPublishPacket(topic, payloadStr) {
-    const tBytes = encodeUtf8Str(topic);
-    const pBytes = ENC.encode(payloadStr);
-    const remLen = encodeVarLen(tBytes.length + pBytes.length);
-    return concatBytes([new Uint8Array([0x30, ...remLen]), tBytes, pBytes]);
-  }
-
-  function makeClientId() {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let s = 'nm_';
-    for (let i = 0; i < 14; i++) s += chars[Math.floor(Math.random() * chars.length)];
-    return s;
-  }
-
-  // ── TRANSPORT CLIENT ────────────────────────────────────────────────────────
   class NetworkMQTTTransportClass {
     constructor(opts = {}) {
       this.brokers = Array.isArray(opts.brokers) && opts.brokers.length ? opts.brokers.slice() : DEFAULT_BROKERS.slice();
@@ -173,6 +31,7 @@
       this.connected = false;
       this.closedByUser = false;
       this._rxBuf = new Uint8Array(0);
+      this._outQueue = [];
       this._pingTimer = null;
       this._reconnectTimer = null;
       this._packetId = 1;
@@ -229,7 +88,7 @@
           try { ws.close(); } catch {}
           reject(err);
         };
-        const timer = setTimeout(() => fail(new Error('Relay connect timeout')), 5500);
+        const timer = setTimeout(() => fail(new Error('Relay connect timeout')), 7500);
 
         ws.onopen = () => {
           if (this.ws !== ws || this.closedByUser) return;
@@ -241,17 +100,16 @@
           const chunk = ev.data instanceof ArrayBuffer ? new Uint8Array(ev.data) : ENC.encode(String(ev.data || ''));
           this._feedMqttBytes(chunk, (pktType, payload) => {
             if (pktType === 2) {
-              // CONNACK
               if (payload.rc !== 0) { fail(new Error(`MQTT refused (${payload.rc})`)); return; }
               const pid = (this._packetId = (this._packetId % 65000) + 1);
               ws.send(buildSubscribePacket(pid, this.cryptoCtx.topic));
             } else if (pktType === 9) {
-              // SUBACK
               if (!settled) {
                 settled = true;
                 clearTimeout(timer);
                 this.connected = true;
                 this._startPing(ws);
+                this._flushOutQueue();
                 resolve(true);
               }
             } else if (pktType === 3 && payload.topic === this.cryptoCtx.topic) {
@@ -280,13 +138,14 @@
         this.ws = ws;
 
         const fail = (err) => { if (settled) return; settled = true; clearTimeout(timer); try { ws.close(); } catch {} reject(err); };
-        const timer = setTimeout(() => fail(new Error('Custom relay timeout')), 5500);
+        const timer = setTimeout(() => fail(new Error('Custom relay timeout')), 7500);
 
         ws.onopen = () => {
           if (this.ws !== ws || this.closedByUser) return;
           settled = true;
           clearTimeout(timer);
           this.connected = true;
+          this._flushOutQueue();
           resolve({ ok: true, broker: url, brokerIndex: 0, topic: this.cryptoCtx.topic });
         };
         ws.onmessage = (ev) => {
@@ -342,18 +201,42 @@
       if (msg && typeof this._onMessage === 'function') this._onMessage(msg);
     }
 
+    _enqueueOutbound(payloadObj) {
+      if (this.closedByUser || !payloadObj || payloadObj.type === 'HEARTBEAT') return;
+      if (payloadObj.type === 'STATE_SYNC') {
+        this._outQueue = this._outQueue.filter(m => m.type !== 'STATE_SYNC');
+      }
+      this._outQueue.push(payloadObj);
+      if (this._outQueue.length > 8) this._outQueue.shift();
+    }
+
+    _flushOutQueue() {
+      if (!this._outQueue.length || !this.connected) return;
+      const pending = this._outQueue.splice(0, this._outQueue.length);
+      pending.forEach(item => this.publish(item));
+    }
+
     async publish(payloadObj) {
-      if (!this.connected || !this.ws || this.ws.readyState !== 1 || !this.cryptoCtx) return false;
+      if (!this.cryptoCtx) return false;
+      if (!this.connected || !this.ws || this.ws.readyState !== 1) {
+        this._enqueueOutbound(payloadObj);
+        if (!this.closedByUser && this.roomCode) this._scheduleReconnect();
+        return false;
+      }
       try {
         const sealed = await sealPacket(this.cryptoCtx, payloadObj);
-        if (!this.connected || !this.ws || this.ws.readyState !== 1) return false;
+        if (!this.connected || !this.ws || this.ws.readyState !== 1) {
+          this._enqueueOutbound(payloadObj);
+          return false;
+        }
         if (this.customRelayUrl) {
           this.ws.send(sealed);
         } else {
           this.ws.send(buildPublishPacket(this.cryptoCtx.topic, sealed));
         }
         return true;
-      } catch {
+      } catch (err) {
+        console.warn('[NetworkMQTTTransport] publish failed:', err);
         return false;
       }
     }
@@ -379,8 +262,9 @@
         if (this.closedByUser || !this.roomCode) return;
         try {
           if (this.customRelayUrl) await this._openCustomRelay();
-          else await this._openMqttWithFailover(this.brokerIndex, true);
+          else await this._openMqttWithFailover(this.brokerIndex, false);
           this._onStatus?.('');
+          this._flushOutQueue();
           this._onReconnect?.();
         } catch {
           this._scheduleReconnect();
@@ -414,6 +298,7 @@
 
     disconnect() {
       this.closedByUser = true;
+      this._outQueue = [];
       if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
       this._clearSocketOnly();
       if (this._visHandler && typeof document !== 'undefined') {

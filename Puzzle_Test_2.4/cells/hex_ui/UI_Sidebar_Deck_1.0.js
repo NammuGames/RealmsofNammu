@@ -306,6 +306,7 @@
 
     handleEndTurn() {
       if (global.TurnConfirmPopup?.isOpen?.()) {
+        global.TurnConfirmPopup.confirm();
         return;
       }
       if (global.GameSettingsRenamePopup?.isOpen?.()) {

@@ -51,7 +51,7 @@
       this.state = 'pressed';
     }
 
-    handlePointerUp(wasInside = true) {
+    handlePointerUp(wasInside = true, isTouch = false) {
       if ((this.disabled || this.node?.ghost) && !this.allowGhostClick) return;
       if (this.state === 'pressed' && wasInside) {
         if (this.soundClick && global.AudioSynth && typeof global.AudioSynth.playClick === 'function') {
@@ -61,7 +61,7 @@
           this.onClick(this.node);
         }
       }
-      this.state = wasInside ? 'hovered' : 'idle';
+      this.state = (wasInside && !isTouch) ? 'hovered' : 'idle';
     }
 
     render(ctx, node) {

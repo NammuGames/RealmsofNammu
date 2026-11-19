@@ -141,7 +141,9 @@
       } else if (global.TurnConfirmPopup?.isOpen?.() && global.TurnConfirmPopup.frameNode) {
         const frame = global.TurnConfirmPopup.frameNode;
         const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
-        if (!hitPopup) {
+        const btnConfirm = global.UISidebarDeck?.rightButtonNodes?.[5];
+        const hitConfirmBtn = !!(btnConfirm && btnConfirm.containsScreenPoint?.(pos.x, pos.y));
+        if (!hitPopup && !hitConfirmBtn) {
           if (!frame.animating) global.TurnConfirmPopup.close();
           return;
         }
@@ -170,7 +172,9 @@
       } else if (global.TurnConfirmPopup?.isOpen?.() && global.TurnConfirmPopup.frameNode) {
         const frame = global.TurnConfirmPopup.frameNode;
         const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
-        if (!hitPopup) {
+        const btnConfirm = global.UISidebarDeck?.rightButtonNodes?.[5];
+        const hitConfirmBtn = !!(btnConfirm && btnConfirm.containsScreenPoint?.(pos.x, pos.y));
+        if (!hitPopup && !hitConfirmBtn) {
           if (!frame.animating) global.TurnConfirmPopup.close();
           return;
         }
@@ -257,8 +261,9 @@
         const pos = getPos(t || e);
         const wasInside = this.pressedNode.containsScreenPoint(pos.x, pos.y);
         const btn = this.pressedNode.getTrait('button');
-        if (btn) btn.handlePointerUp(wasInside);
+        if (btn) btn.handlePointerUp(wasInside, true);
         this.pressedNode = null;
+        this.hoveredNode = null;
       }
     }, { passive: false });
 
@@ -267,8 +272,9 @@
       clearTouchScroll();
       if (this.pressedNode) {
         const btn = this.pressedNode.getTrait('button');
-        if (btn) btn.handlePointerUp(false);
+        if (btn) btn.handlePointerUp(false, true);
         this.pressedNode = null;
+        this.hoveredNode = null;
       }
     }, { passive: true });
 

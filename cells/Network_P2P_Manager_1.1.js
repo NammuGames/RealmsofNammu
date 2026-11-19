@@ -350,9 +350,8 @@
       const origEnd = global.TurnManager.endTurn;
       global.TurnManager.endTurn = guardTurn(function(...args) {
         const res = origEnd.apply(this, args);
-        if (!self._applyingRemote && self.isConnected() && res !== false) {
-          if (!self.turnOnlySync) self._emit('ACTION', { op: 'END_TURN' });
-          setTimeout(() => { self.syncFullState('TURN_END'); self._updateDrawerUI(); }, 350);
+        if (!self._applyingRemote && self.isConnected() && res !== false && !self.turnOnlySync) {
+          self._emit('ACTION', { op: 'END_TURN' });
         }
         return res;
       });
@@ -364,6 +363,9 @@
         const res = origComplete.apply(this, args);
         const curIdx = global.GameState?.activePlayerIndex || 0;
         if (self.isSeatLocal(curIdx)) self.lastLocalActivePlayerIndex = curIdx;
+        if (!self._applyingRemote && self.isConnected()) {
+          self.syncFullState('TURN_END');
+        }
         self._updateDrawerUI();
         return res;
       };

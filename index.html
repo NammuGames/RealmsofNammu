@@ -8,8 +8,18 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=Orbitron:wght@500;700;900&amp;family=Outfit:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="Puzzle_Test_2.4/style.css">
+  <style>
+    body:not(.dev-drawers-enabled) #btn-toggle-metrics,
+    body:not(.dev-drawers-enabled) #btn-toggle-tuning,
+    body:not(.dev-drawers-enabled) #metrics-drawer,
+    body:not(.dev-drawers-enabled) #tuning-drawer {
+      display: none !important;
+    }
+  </style>
+  <script src="dev_drawers.js"></script>
 </head>
 <body>
+  <script>if (window.__NAMMU_DEV_DRAWERS__) document.body.classList.add('dev-drawers-enabled');</script>
 
   <!-- VIEWPORT & SHARED CANVAS STACK -->
   <div id="viewport-container">

@@ -264,6 +264,9 @@
       if (global.GameSettingsCanvas) {
         global.GameSettingsCanvas.openSetupMenu('btn-nav-menu', { silent: true });
       }
+      if (global.ResponsiveViewportAdapter?.syncViewport) {
+        global.ResponsiveViewportAdapter.syncViewport();
+      }
     },
 
     unmount(ctx = {}) {

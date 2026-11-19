@@ -325,7 +325,10 @@
     }
 
     _onRootClicked() {
-      if (this.stage !== 'idle_root' || this.crownOpen) return;
+      const canExpand = (this.stage === 'idle_root') || (this.stage === 'expand_root' && (this.rootNode?.scale || 0) >= 0.70);
+      if (!canExpand || this.crownOpen) return;
+      global.TweenOrchestrator?.cancel?.('hub_root_expand');
+      if (this.rootNode) { this.rootNode.scale = 1.0; this.rootNode.alpha = 1.0; }
       this.crownOpen = true;
       this.stage = 'crown_expand';
       global.AudioSynth?.playConfirm?.();
@@ -381,49 +384,54 @@
     }
 
     _onPuzzleClicked() {
-      if (this.stage !== 'idle_crown') return;
+      const canClick = (this.stage === 'idle_crown') || (this.stage === 'crown_expand' && this.crownProgress >= 0.65);
+      if (!canClick) return;
+      global.TweenOrchestrator?.cancel?.('hub_crown_drift');
+      this.crownProgress = 1.0; this.ribbonProgress = 1.0;
+      this.branchNodes.forEach((b) => { b.scale = 1.0; b.alpha = 1.0; });
+      this._applyPositions();
       this.stage = 'launching';
       global.AudioSynth?.playConfirm?.();
 
-      const lockBtn = (n) => {
-        const b = n?.getTrait?.('button');
-        if (b) b.disabled = true;
-      };
-      lockBtn(this.rootNode);
-      this.branchNodes.forEach(lockBtn);
+      const setBtnLocked = (n, locked) => { const b = n?.getTrait?.('button'); if (b) b.disabled = locked; };
+      setBtnLocked(this.rootNode, true);
+      this.branchNodes.forEach(n => setBtnLocked(n, true));
+
+      const puzzleTxt = this.branchNodes[1]?.getTrait?.('text');
+      if (puzzleTxt) puzzleTxt.subtitle = 'Loading...';
 
       const tweens = global.TweenOrchestrator;
       const beatMs = (global.H_TIMING?.BEAT_SEC || 0.302718) * 1000;
-      const launch = async () => {
-        this.unmount();
+      const runLaunch = async () => {
         const loader = this.ctx?.loader || global.HubGameLoader;
-        const ok = loader ? await loader.launchGame('puzzle') : false;
+        const ok = loader ? await loader.launchGame('puzzle', {
+          onProgress: (done, total) => {
+            if (puzzleTxt) puzzleTxt.subtitle = `Loading ${Math.round((done / Math.max(1, total)) * 100)}%`;
+          },
+          onBeforeMount: () => new Promise((res) => {
+            if (puzzleTxt) puzzleTxt.subtitle = '';
+            if (!tweens?.add) { this.unmount(); res(); return; }
+            tweens.add({
+              id: 'hub_fade_out', from: 1.0, to: 0.0, duration: Math.round(beatMs * 1.5), easing: 'easeInOutQuad',
+              onUpdate: (val) => {
+                this.uiAlpha = val;
+                if (this.rootNode) this.rootNode.alpha = val;
+                this.branchNodes.forEach((b) => { b.alpha = val; });
+              },
+              onComplete: () => { this.uiAlpha = 0.0; this.unmount(); res(); }
+            });
+          })
+        }) : false;
+
         if (!ok) {
           this.mount(this.ctx, { skipIntro: true });
+          const txt = this.branchNodes[1]?.getTrait?.('text');
+          if (txt) txt.subtitle = 'Tap To Retry';
+          setBtnLocked(this.branchNodes[1], false);
         }
       };
 
-      if (!tweens?.add) {
-        launch();
-        return;
-      }
-
-      tweens.add({
-        id: 'hub_fade_out',
-        from: 1.0,
-        to: 0.0,
-        duration: Math.round(beatMs * 2),
-        easing: 'easeInOutQuad',
-        onUpdate: (val) => {
-          this.uiAlpha = val;
-          if (this.rootNode) this.rootNode.alpha = val;
-          this.branchNodes.forEach((b) => { b.alpha = val; });
-        },
-        onComplete: () => {
-          this.uiAlpha = 0.0;
-          launch();
-        }
-      });
+      runLaunch();
     }
 
     _renderStageBackdrop(ctx) {

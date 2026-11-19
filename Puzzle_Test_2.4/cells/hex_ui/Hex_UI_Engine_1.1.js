@@ -45,13 +45,16 @@
     if (!this.canvas) return;
 
     const getPos = (e) => {
-      const clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : (e.clientX ?? 0);
-      const clientY = (e.touches && e.touches[0]) ? e.touches[0].clientY : (e.clientY ?? 0);
+      const t = (e.touches && e.touches[0]) ? e.touches[0] : ((e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e);
+      const clientX = t.clientX ?? 0;
+      const clientY = t.clientY ?? 0;
       if (this.isPortrait) {
         return { x: clientY, y: window.innerWidth - clientX };
       }
       const r = this.canvas.getBoundingClientRect();
-      return { x: clientX - r.left, y: clientY - r.top };
+      const sx = r.width > 0 ? (this.canvas.width / r.width) : 1;
+      const sy = r.height > 0 ? (this.canvas.height / r.height) : 1;
+      return { x: (clientX - r.left) * sx, y: (clientY - r.top) * sy };
     };
 
     this.canvas.addEventListener('mousemove', (e) => {
@@ -146,6 +149,14 @@
         const wasInside = this.pressedNode.containsScreenPoint(pos.x, pos.y);
         const btn = this.pressedNode.getTrait('button');
         if (btn) btn.handlePointerUp(wasInside);
+        this.pressedNode = null;
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchcancel', () => {
+      if (this.pressedNode) {
+        const btn = this.pressedNode.getTrait('button');
+        if (btn) btn.handlePointerUp(false);
         this.pressedNode = null;
       }
     }, { passive: true });

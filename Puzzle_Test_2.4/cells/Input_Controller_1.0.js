@@ -48,13 +48,16 @@
       if (!canvas) return;
 
       const getScreenPos = (e) => {
-        const clientX = (e.touches && e.touches[0]) ? e.touches[0].clientX : (e.clientX ?? 0);
-        const clientY = (e.touches && e.touches[0]) ? e.touches[0].clientY : (e.clientY ?? 0);
+        const t = (e.touches && e.touches[0]) ? e.touches[0] : ((e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e);
+        const clientX = t.clientX ?? 0;
+        const clientY = t.clientY ?? 0;
         if (global.HexUIEngine?.isPortrait) {
           return { x: clientY, y: window.innerWidth - clientX };
         }
         const rect = canvas.getBoundingClientRect();
-        return { x: clientX - rect.left, y: clientY - rect.top };
+        const sx = rect.width > 0 ? (canvas.width / rect.width) : 1;
+        const sy = rect.height > 0 ? (canvas.height / rect.height) : 1;
+        return { x: (clientX - rect.left) * sx, y: (clientY - rect.top) * sy };
       };
 
       // 1. Mouse Move: Hover tracking & Drag delta

@@ -53,6 +53,24 @@
       const style = document.createElement('style');
       style.id = STYLE_ID;
       style.textContent = `
+        html, body {
+          position: fixed !important; inset: 0 !important;
+          width: 100% !important; height: 100% !important;
+          overflow: hidden !important; overscroll-behavior: none !important;
+          touch-action: none !important; margin: 0 !important; padding: 0 !important;
+        }
+        #viewport-container, #canvas-domain-warp, #canvas-board-overlay {
+          position: fixed !important; inset: 0 !important;
+          width: 100% !important; height: 100% !important;
+          transform: none !important; max-width: none !important; max-height: none !important;
+        }
+        .hud-drawer { position: fixed !important; }
+        .hud-drawer.dock-left.collapsed, #metrics-drawer:not(.dock-right).collapsed, #tuning-drawer.dock-left.collapsed {
+          transform: translateX(-120%) !important;
+        }
+        .hud-drawer.dock-right.collapsed, #tuning-drawer:not(.dock-left).collapsed, #metrics-drawer.dock-right.collapsed {
+          transform: translateX(120%) !important;
+        }
         #${OVERLAY_ID} {
           position: fixed; inset: 0; z-index: 9999; display: none;
           align-items: center; justify-content: center; flex-direction: column; gap: 14px;
@@ -111,12 +129,15 @@
 
     _bindEvents() {
       if (typeof window === 'undefined') return;
-      const onChange = () => {
-        // Defer one microtask so BoardCameraController finishes first before we enforce landscape
+      const scheduleSync = () => {
         queueMicrotask(() => this.syncViewport());
+        setTimeout(() => this.syncViewport(), 90);
+        setTimeout(() => this.syncViewport(), 280);
       };
-      window.addEventListener('resize', onChange);
-      window.addEventListener('orientationchange', onChange);
+      window.addEventListener('resize', scheduleSync);
+      window.addEventListener('orientationchange', scheduleSync);
+      global.visualViewport?.addEventListener('resize', scheduleSync);
+      global.visualViewport?.addEventListener('scroll', scheduleSync);
 
       // Best-effort native orientation lock when interacting on supported mobile browsers
       const tryLockLandscape = () => {
@@ -135,6 +156,15 @@
         origResize(w, h);
         this.applyLayoutToEngine(w, h);
       };
+      if (typeof engine.setStudioOverlay === 'function') {
+        const origSetOverlay = engine.setStudioOverlay.bind(engine);
+        engine.setStudioOverlay = (node) => {
+          origSetOverlay(node);
+          if (node) {
+            this.applyLayoutToEngine(engine.viewWidth || global.innerWidth, engine.viewHeight || global.innerHeight);
+          }
+        };
+      }
       this._wrappedEngine = true;
     }
 
@@ -169,23 +199,26 @@
     }
 
     syncViewport() {
-      const vw = global.innerWidth || 1280;
-      const vh = global.innerHeight || 720;
-      this.isPortrait = vh > vw;
-
       const canvasWarp = this.dom?.canvasWarp || document.getElementById('canvas-domain-warp');
       const canvasBoard = this.dom?.canvasBoard || document.getElementById('canvas-board-overlay');
+      const container = this.dom?.viewport || document.getElementById('viewport-container');
+      const rect = (canvasBoard || container)?.getBoundingClientRect?.();
+      const vw = Math.max(240, Math.round((rect && rect.width > 0 ? rect.width : 0) || global.visualViewport?.width || global.innerWidth || 1280));
+      const vh = Math.max(180, Math.round((rect && rect.height > 0 ? rect.height : 0) || global.visualViewport?.height || global.innerHeight || 720));
+      this.isPortrait = vh > vw;
       const warpScale = this.state?.warpRenderScale || 0.75;
 
       // Enforce Landscape-Only: never CSS-rotate #canvas-board-overlay sideways
       if (canvasBoard) {
         canvasBoard.classList.remove('portrait-mode');
-        canvasBoard.width = vw;
-        canvasBoard.height = vh;
+        if (canvasBoard.width !== vw) canvasBoard.width = vw;
+        if (canvasBoard.height !== vh) canvasBoard.height = vh;
       }
       if (canvasWarp) {
-        canvasWarp.width = Math.round(vw * warpScale);
-        canvasWarp.height = Math.round(vh * warpScale);
+        const ww = Math.round(vw * warpScale);
+        const wh = Math.round(vh * warpScale);
+        if (canvasWarp.width !== ww) canvasWarp.width = ww;
+        if (canvasWarp.height !== wh) canvasWarp.height = wh;
       }
       if (this.overlayEl) {
         this.overlayEl.classList.toggle('visible', this.isPortrait);

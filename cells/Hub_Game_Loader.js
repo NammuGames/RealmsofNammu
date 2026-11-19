@@ -55,22 +55,33 @@
      * @param {string} src
      * @returns {Promise<string>}
      */
-    loadScript(src) {
+    loadScript(src, optional = false) {
       if (!src) return Promise.reject(new Error('HubGameLoader: Empty script path.'));
       if (this.loadedScripts.has(src)) return this.loadedScripts.get(src);
 
-      const promise = new Promise((resolve, reject) => {
+      const attemptLoad = (retriesLeft) => new Promise((resolve, reject) => {
         const el = document.createElement('script');
         el.src = src;
         el.async = false;
         el.onload = () => resolve(src);
         el.onerror = () => {
+          el.remove();
+          if (retriesLeft > 0) {
+            setTimeout(() => attemptLoad(retriesLeft - 1).then(resolve, reject), 150);
+            return;
+          }
+          if (optional) {
+            console.warn(`[Hub_Game_Loader] Optional script unavailable: "${src}"`);
+            resolve(null);
+            return;
+          }
           this.loadedScripts.delete(src);
           reject(new Error(`HubGameLoader: Failed to load script "${src}"`));
         };
         document.body.appendChild(el);
       });
 
+      const promise = attemptLoad(1);
       this.loadedScripts.set(src, promise);
       return promise;
     }
@@ -90,21 +101,31 @@
     }
 
     /**
-     * Loads scripts sequentially so multi-part _1.0/_1.1 cells execute in order.
+     * Downloads scripts in parallel (via async=false) while preserving strict in-order execution.
      * @param {Array<string>} urls
+     * @param {Function} [onProgress]
      */
-    async loadScriptSequence(urls) {
-      for (let i = 0; i < urls.length; i++) {
-        await this.loadScript(urls[i]);
-      }
+    async loadScriptSequence(urls, onProgress = null) {
+      const total = urls.length;
+      let done = 0;
+      const promises = urls.map((u) => {
+        const isCdn = /^https?:\/\//i.test(u);
+        return this.loadScript(u, isCdn).then((res) => {
+          done++;
+          if (typeof onProgress === 'function') onProgress(done, total);
+          return res;
+        });
+      });
+      await Promise.all(promises);
     }
 
     /**
      * Loads and mounts a registered game on demand over the running Hub runtime.
      * @param {string} id
+     * @param {Object} [opts]
      * @returns {Promise<boolean>}
      */
-    async launchGame(id) {
+    async launchGame(id, opts = {}) {
       if (this.isLoading) return false;
       const meta = this.games.get(id);
       if (!meta) {
@@ -127,10 +148,13 @@
 
         if (Array.isArray(entry.scripts) && entry.scripts.length > 0 && !entry._scriptsLoaded) {
           const resolved = entry.scripts.map((s) => this.resolvePath(meta.basePath, s));
-          await this.loadScriptSequence(resolved);
+          await this.loadScriptSequence(resolved, opts.onProgress);
           entry._scriptsLoaded = true;
         }
 
+        if (typeof opts.onBeforeMount === 'function') {
+          await opts.onBeforeMount();
+        }
         await entry.mount(this.hubContext, meta);
         this.activeGameId = id;
         if (typeof this.onGameMounted === 'function') {

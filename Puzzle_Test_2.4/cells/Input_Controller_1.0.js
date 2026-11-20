@@ -112,6 +112,7 @@
 
       canvas.addEventListener('touchstart', (e) => {
         markTouch();
+        if (e.touches.length > 1) { this.isMouseDown = false; this.hasDragged = true; return; }
         if (this.isAnyCanvasOpen() || !global.GameState?.matchStarted || global.GameState?.isMatchStarting || global.GameState?.isMatchEnding) return;
         this.isMouseDown = true;
         this.hasDragged = false;
@@ -122,6 +123,7 @@
 
       canvas.addEventListener('touchmove', (e) => {
         markTouch();
+        if (e.touches.length > 1) { this.isMouseDown = false; this.hasDragged = true; return; }
         if (!this.isMouseDown) return;
         const t = e.touches[0];
         if (!t) return;
@@ -149,7 +151,8 @@
         if (e.target === canvas) markTouch();
         if (!this.isMouseDown) return;
         this.isMouseDown = false;
-        if (!this.hasDragged && e.target === canvas) {
+        const recentlyPinched = (performance.now() - (global.__LAST_BOARD_PINCH_MS || -9999)) < 350;
+        if (!this.hasDragged && !recentlyPinched && e.target === canvas) {
           const t = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
           const pos = getScreenPos(t);
           this.handleBoardClick(pos.x, pos.y);

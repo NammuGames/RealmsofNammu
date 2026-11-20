@@ -12,7 +12,7 @@
   const OVERLAY_ID = 'rotate-landscape-overlay';
   const STYLE_ID = 'responsive-viewport-adapter-css';
   const VIRTUAL_BASE_W = 1920;
-  const VIRTUAL_BASE_H = 880;
+  const VIRTUAL_BASE_H = 1000;
   const MAX_DPR = 2;
 
   class ResponsiveViewportAdapterClass {

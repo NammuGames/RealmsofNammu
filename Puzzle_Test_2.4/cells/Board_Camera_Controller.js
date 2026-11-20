@@ -77,32 +77,85 @@
       let touchPanActive = false;
       let touchLastX = 0;
       let touchLastY = 0;
+      let pinchActive = false;
+      let pinchStartDist = 0;
+      let pinchStartZoom = 1.0;
+      let pinchMidX = 0;
+      let pinchMidY = 0;
 
-      canvasBoard.addEventListener('touchstart', (e) => {
-        if (state.cameraLocked || e.touches.length !== 1 || global.InputController?.isAnyCanvasOpen?.()) return;
-        const t = e.touches[0];
+      const isBoardHit = (t) => {
         const pos = toBackingPos(t.clientX, t.clientY);
         const hit = engine.hitTestNode(engine.root, pos.x, pos.y);
-        if (hit === engine.boardFrame || hit === engine.root) {
+        return hit === engine.boardFrame || hit === engine.root;
+      };
+
+      canvasBoard.addEventListener('touchstart', (e) => {
+        if (state.cameraLocked || global.InputController?.isAnyCanvasOpen?.()) return;
+        if (e.touches.length === 2) {
+          const t0 = e.touches[0], t1 = e.touches[1];
+          if (!isBoardHit(t0) && !isBoardHit(t1)) return;
+          touchPanActive = false;
+          pinchActive = true;
+          pinchStartDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+          pinchStartZoom = global.BoardRenderer?.targetZoom ?? state.targetZoom ?? 1.0;
+          pinchMidX = (t0.clientX + t1.clientX) * 0.5;
+          pinchMidY = (t0.clientY + t1.clientY) * 0.5;
+          global.__LAST_CANVAS_TOUCH_MS = performance.now();
+          global.__LAST_BOARD_PINCH_MS = performance.now();
+          if (engine) engine.pressedNode = null;
+          if (e.cancelable) e.preventDefault();
+          return;
+        }
+        if (e.touches.length !== 1) { touchPanActive = false; return; }
+        const t = e.touches[0];
+        if (isBoardHit(t)) {
           touchPanActive = true;
           touchLastX = t.clientX;
           touchLastY = t.clientY;
         }
-      }, { passive: true });
+      }, { passive: false });
 
       window.addEventListener('touchmove', (e) => {
-        if (!touchPanActive || state.cameraLocked || e.touches.length !== 1) return;
+        if (state.cameraLocked) return;
+        if (pinchActive && e.touches.length === 2) {
+          if (e.cancelable) e.preventDefault();
+          const t0 = e.touches[0], t1 = e.touches[1];
+          const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+          const midX = (t0.clientX + t1.clientX) * 0.5;
+          const midY = (t0.clientY + t1.clientY) * 0.5;
+          const sc = getStageScale();
+          if (pinchStartDist > 10 && dist > 10) {
+            const nextZoom = pinchStartZoom * (dist / pinchStartDist);
+            if (global.BoardRenderer?.setZoom) global.BoardRenderer.setZoom(nextZoom, 0, 0);
+            else state.targetZoom = Math.max(0.4, Math.min(2.5, nextZoom));
+          }
+          state.targetPanX += (midX - pinchMidX) / sc;
+          state.targetPanY += (midY - pinchMidY) / sc;
+          pinchMidX = midX;
+          pinchMidY = midY;
+          global.__LAST_BOARD_PINCH_MS = performance.now();
+          return;
+        }
+        if (!touchPanActive || e.touches.length !== 1) return;
         const t = e.touches[0];
         const sc = getStageScale();
         state.targetPanX += (t.clientX - touchLastX) / sc;
         state.targetPanY += (t.clientY - touchLastY) / sc;
         touchLastX = t.clientX;
         touchLastY = t.clientY;
-      }, { passive: true });
+      }, { passive: false });
 
-      const endTouchPan = () => { touchPanActive = false; };
-      window.addEventListener('touchend', endTouchPan, { passive: true });
-      window.addEventListener('touchcancel', endTouchPan, { passive: true });
+      const endTouchGestures = (e) => {
+        const count = e?.touches ? e.touches.length : 0;
+        if (count < 2) pinchActive = false;
+        if (count === 0) touchPanActive = false;
+        else if (count === 1) {
+          // Avoid sudden jump when lifting one finger out of a pinch
+          touchPanActive = false;
+        }
+      };
+      window.addEventListener('touchend', endTouchGestures, { passive: true });
+      window.addEventListener('touchcancel', endTouchGestures, { passive: true });
     }
 
     initResetButton() {

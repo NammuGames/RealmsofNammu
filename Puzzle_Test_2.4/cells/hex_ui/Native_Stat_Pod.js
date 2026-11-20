@@ -311,7 +311,7 @@
         curX += m.pairSpan + gap;
       });
 
-      if (this.topPodNode) this.topPodNode.updateTransforms();
+      if (this.topPodNode) this.topPodNode.updateTransforms(this.topPodNode.parent?.worldMatrix || this.engine?.root?.worldMatrix || null);
     }
 
     updateHpCompLayout() {

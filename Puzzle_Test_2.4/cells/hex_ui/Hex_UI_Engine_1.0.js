@@ -161,10 +161,10 @@
 
     /**
      * Resizes frames dynamically to fit screen dimensions.
-     * Locked scale base is IDENTICAL to Test 2.2 calibrated geometry (1920x1080 baseline):
+     * Consumes the Single Source of Truth baseline (window.NAMMU_UI_BASELINE: 1920x945):
      * Sidebars: 240px, Gaps: 5px, Board Min Width: 1430px, Scroll Gap: 32px, Apex: 32px.
      * Center board widens like an unrolling scroll on wider screens.
-     * Uniformly scales down on square/narrow screens maintaining exact proportions.
+     * Uniformly scales down on smaller/narrower screens maintaining exact proportions.
      */
     resize(width, height) {
       this.viewWidth = width;
@@ -172,13 +172,16 @@
 
       if (!this.initialized) return;
 
-      const BASE_W = 1920, BASE_H = 750;
-      const BASE_SIDEBAR_W = 240, BASE_GAP = 5, BASE_MIN_BOARD_W = 1430;
-      const BASE_APEX_H = 32, BASE_SCROLL_GAP_Y = 32;
+      const base = global.NAMMU_UI_BASELINE || {};
+      const BASE_W = base.width ?? 1920;
+      const BASE_H = base.height ?? 945;
+      const BASE_SIDEBAR_W = base.sidebarWidth ?? 240;
+      const BASE_GAP = base.gapX ?? 5;
+      const BASE_MIN_BOARD_W = base.minBoardWidth ?? 1430;
+      const BASE_APEX_H = base.apexHeight ?? 32;
+      const BASE_SCROLL_GAP_Y = base.scrollGapY ?? 32;
 
-      // When screen is wider than 1920 and normal desktop height (>=750px), scale is locked at 1.0
-      // Sidebars stay at 240px with 5px gaps, and board unrolls wider on wider screens.
-      // Scaling down only occurs if screen width < 1920 or height is constrained (< 750px).
+      // Locked at 1.0 whenever viewport meets or exceeds the calibrated 1920x945 baseline.
       const hudScale = Math.min(1.0, width / BASE_W, height / BASE_H);
       this.hudScale = hudScale;
 

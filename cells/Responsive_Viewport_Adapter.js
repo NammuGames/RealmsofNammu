@@ -11,8 +11,19 @@
 
   const OVERLAY_ID = 'rotate-landscape-overlay';
   const STYLE_ID = 'responsive-viewport-adapter-css';
-  const VIRTUAL_BASE_W = 1920;
-  const VIRTUAL_BASE_H = 1000;
+  // Single Source of Truth for calibrated UI geometry (1920x945 desktop baseline)
+  const UI_BASELINE = Object.freeze({
+    width: 1920,
+    height: 945,
+    sidebarWidth: 240,
+    gapX: 5,
+    minBoardWidth: 1430,
+    apexHeight: 32,
+    scrollGapY: 32
+  });
+  global.NAMMU_UI_BASELINE = UI_BASELINE;
+  const VIRTUAL_BASE_W = UI_BASELINE.width;
+  const VIRTUAL_BASE_H = UI_BASELINE.height;
   const MAX_DPR = 2;
 
   class ResponsiveViewportAdapterClass {

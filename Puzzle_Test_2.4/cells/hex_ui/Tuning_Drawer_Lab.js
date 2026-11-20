@@ -207,10 +207,13 @@
         if (boardPos && rightPos && board && right) {
           rightGap = Math.round((rightPos.x - right.wBase * 0.5) - (boardPos.x + board.wBase * 0.5));
         }
-        const topScrollGap = board ? Math.round((h - board.hBase) * 0.5) : 32;
+        const viewH = engine?.viewHeight || h;
+        const topScrollGap = board ? Math.round((viewH - board.hBase) * 0.5) : 32;
+        const stageScale = global.ResponsiveViewportAdapter?.stageScale ?? 1.0;
 
         return {
           viewport: { width: w, height: h, dpr, orientation: engine?.isPortrait ? 'portrait (virtual landscape)' : 'landscape' },
+          stageScale: Number(stageScale.toFixed(3)),
           hudScale: Number(scale.toFixed(3)),
           leftSidebar: { width: leftW, bodyHeight: leftHBody, apexHeight: leftApex, totalHeight: leftTotalH },
           boardFrame: { width: boardW, height: boardH, topScrollGap },

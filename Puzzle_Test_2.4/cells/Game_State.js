@@ -29,6 +29,7 @@
       this.placedThisTurn = false; this.round = 1; this.level = 1; this.score = 0; this.hoveredHex = null; this.activeRightPanel = 'materials';
       this.matchConfig = null; this.playerCount = 1; this.activePlayerIndex = 0; this.players = [];
       this.matchStarted = false; this.isMatchStarting = false; this.isMatchEnding = false;
+      this.turnPhase = 'MID_TURN'; // 'START_TURN' | 'MID_TURN' | 'END_TURN'
     }
 
     get pendingDamage() { return typeof this.getPendingDamage === 'function' ? this.getPendingDamage() : (this.activeDamageTiles?.length || 0); }

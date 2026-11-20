@@ -12,6 +12,7 @@
   class TurnManagerClass {
     constructor() {
       this.isEndingTurn = false;
+      this.isStartingTurn = false;
     }
 
     /**
@@ -27,9 +28,11 @@
      */
     endTurn() {
       const state = global.GameState;
-      if (!state || state.gameOver || this.isEndingTurn) return;
+      if (!state || state.gameOver || this.isEndingTurn || this.isStartingTurn || state.turnPhase === 'START_TURN') return false;
       this.isEndingTurn = true;
+      state.turnPhase = 'END_TURN';
       state.isSequentialPlacing = true;
+      global.TurnLogManager?.beginLocalEndTurn?.();
       state.syncUI();
       global.UICardsDeck?.syncSpellbookColumnWithGameState?.();
 

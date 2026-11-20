@@ -25,17 +25,14 @@
     init(canvas) {
       if (!canvas) return false;
       this.canvas = canvas;
-      this.gl = canvas.getContext('webgl2', {
+      const isMobile = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches || Math.min(window.innerWidth, window.innerHeight) <= 560);
+      const glOpts = {
         alpha: false,
         depth: false,
         antialias: false,
-        powerPreference: 'high-performance'
-      }) || canvas.getContext('webgl', {
-        alpha: false,
-        depth: false,
-        antialias: false,
-        powerPreference: 'high-performance'
-      });
+        powerPreference: isMobile ? 'default' : 'high-performance'
+      };
+      this.gl = canvas.getContext('webgl2', glOpts) || canvas.getContext('webgl', glOpts);
 
       if (!this.gl) {
         console.warn('CosmicDomainWarp: WebGL not supported on this context.');
@@ -45,15 +42,16 @@
       const gl = this.gl;
       this.isWebGL2 = (typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext);
 
-      // GPU Hardware Profiler (Planet Test 3.0 Architecture with dual WebGL 1/2 and fail-safe fallback)
-      try {
-        if (this.isWebGL2) {
-          this.extTimer = gl.getExtension('EXT_disjoint_timer_query_webgl2') || gl.getExtension('EXT_disjoint_timer_query');
-        } else {
-          this.extTimer = gl.getExtension('EXT_disjoint_timer_query');
+      // GPU Hardware Profiler (only active when dev drawers are enabled)
+      this.extTimer = null;
+      if (global.__NAMMU_DEV_DRAWERS__) {
+        try {
+          this.extTimer = this.isWebGL2
+            ? (gl.getExtension('EXT_disjoint_timer_query_webgl2') || gl.getExtension('EXT_disjoint_timer_query'))
+            : gl.getExtension('EXT_disjoint_timer_query');
+        } catch (e) {
+          this.extTimer = null;
         }
-      } catch (e) {
-        this.extTimer = null;
       }
 
       this.pendingQuery = null;

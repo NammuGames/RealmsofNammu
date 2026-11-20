@@ -239,7 +239,7 @@
 
     handlePieceClick() {
       const g = global.GameState;
-      if (!g || global.TurnManager?.isEndingTurn) return;
+      if (!g || global.TurnManager?.isEndingTurn || global.TurnManager?.isStartingTurn || g.turnPhase === 'START_TURN' || g.turnPhase === 'END_TURN') return;
       if (g.inForesightMode) {
         if (typeof this.openMaterialsColumn === 'function') this.openMaterialsColumn(true);
         return;
@@ -259,7 +259,7 @@
 
     handleRotate(dir) {
       const g = global.GameState;
-      if (!g || global.TurnManager?.isEndingTurn) return;
+      if (!g || global.TurnManager?.isEndingTurn || global.TurnManager?.isStartingTurn || g.turnPhase === 'START_TURN' || g.turnPhase === 'END_TURN') return;
       if (g.inTeleportMode && g.teleportHeldSigil) {
         g.rotatePiece(dir);
         global.UIDeckSync?.syncMaterialsTrayWithGameState();
@@ -381,12 +381,19 @@
         global.GameSettingsCanvas.popColumn();
         return;
       }
-      const g = global.GameState;
-      if (!g || global.TurnManager?.isEndingTurn) return;
       if (this.state.rightSidebarActiveCol === 1) {
         if (typeof this.closeSpellbookColumn === 'function') this.closeSpellbookColumn();
         return;
       }
+      if (global.TurnLogManager?.hasPendingEntries?.() || global.TurnLogPlayer?.active) {
+        global.AudioSynth?.playClick?.();
+        global.TurnLogPlayer?.advanceOrSkip?.();
+        global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
+        global.BoardRenderer?.render?.();
+        return;
+      }
+      const g = global.GameState;
+      if (!g || global.TurnManager?.isEndingTurn || global.TurnManager?.isStartingTurn || g.turnPhase === 'START_TURN' || g.turnPhase === 'END_TURN') return;
       if (g.inArchMode) {
         if (global.SpellArch?.isPlaced) {
           global.SpellArch.finalizeArch();

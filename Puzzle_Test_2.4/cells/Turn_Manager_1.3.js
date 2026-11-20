@@ -1,7 +1,8 @@
 /**
- * @fileoverview cells/Turn_Manager_1.3.js - Round Advancement & Phase Pipeline
- * @description Coordinates round/player turnover, disease growth, playfield spawns,
- * enchantment expiration transitions, sigil re-evaluation, and tray refill (Phases A through E)
+ * @fileoverview cells/Turn_Manager_1.3.js - End-Turn Settlement & Start-Turn Pipeline
+ * @description Separates End-Turn settlement (undo clear, tray replenish, turn/round rotation)
+ * from the active player's Start-Turn pipeline (Phases B-E: disease growth, playfield spawns,
+ * enchantment expirations, sigil re-evaluation, tray refill, and material spawn pulse)
  * (Part 4 of multi-part TurnManager cell).
  * Adheres strictly to the 500-line hard cap and underscore naming conventions.
  */
@@ -16,23 +17,25 @@
   }
 
   /**
-   * Resets round-level temporary modifiers, increments round, and refills the conveyor tray.
+   * Finalizes the outgoing player's End-Turn (replenishes tray, rotates active player/round,
+   * clears turn modifiers) and stops cleanly before the next player's Start-Turn.
    */
   proto.completeRoundAdvancement = function() {
     const state = global.GameState;
-    const resolver = global.SigilResolver;
     if (!state) return;
 
-    // Clear undo history for completed turn
+    // Clear undo history and capture settled Post-End board + stats before rotating active player/round
     global.UndoManager?.clearTurnHistory?.();
+    global.TurnLogManager?.capturePostEndSnapshot?.();
 
     // Replenish queue, advance active player in roster, and increment round when wrapping to Player 1
-    let wrappedNewRound = true;
     if (global.MatchOrchestrator?.advanceTurnAndRound) {
       const res = global.MatchOrchestrator.advanceTurnAndRound(state);
-      wrappedNewRound = res.wrappedNewRound;
       if (res.matchEnded) {
         if (!state.isMatchEnding) this.isEndingTurn = false;
+        this.isStartingTurn = false;
+        state.turnPhase = 'MID_TURN';
+        global.TurnLogManager?.finishLocalEndTurn?.({ nextPlayerIndex: state.activePlayerIndex, nextRound: state.round });
         global.NetworkP2PManager?.onTurnAdvancementComplete?.();
         state.syncUI();
         global.BoardRenderer?.render?.();
@@ -43,17 +46,64 @@
       state.refillTray();
     }
 
-    // Retain placed state during startup phases A-D (material is not added to the board until Phase E)
-    state.placedThisTurn = true; state.isMaterialSelected = false; state.selectedTrayIndex = 0;
-    state.selectedRotation = 0; state.upDownAxisState = 0; state.placementCursor = { q: 0, r: 0 };
-    state.inSigilStage = false; state.activeMaterialMod = null; state.roundBonusPoints = 0; state.pendingHeal = 0;
+    global.TurnLogManager?.finishLocalEndTurn?.({ nextPlayerIndex: state.activePlayerIndex, nextRound: state.round });
+
+    // Lock mid-turn inputs at settled Post-End state until the active player runs startPlayerTurn()
+    this.isEndingTurn = false;
+    state.turnPhase = 'START_TURN';
+    state.placedThisTurn = true;
+    state.isMaterialSelected = false;
+    state.selectedTrayIndex = 0;
+    state.selectedRotation = 0;
+    state.upDownAxisState = 0;
+    state.placementCursor = { q: 0, r: 0 };
+    state.inSigilStage = false;
+    state.activeMaterialMod = null;
+    state.roundBonusPoints = 0;
+    state.pendingHeal = 0;
 
     // Retain un-resonated Arch pseudo-sigil zones on the board until they resonate
     if (global.SpellArch) { global.SpellArch.isPlaced = false; global.SpellArch.placedCenter = null; global.SpellArch.inArchMode = false; }
     global.SpellWeave?.reset?.();
 
-    // Callback executed strictly AFTER all Disease growth and Playfield spawns have completed,
-    // guaranteeing that active Lock, Burn, Weave, and Phase immunity shields deflect Plague growth
+    const net = global.NetworkP2PManager;
+    const isOnline = !!net?.isConnected?.();
+    const isLocalTurnNow = !isOnline || net.isLocalPlayersTurn();
+
+    if (!isLocalTurnNow) {
+      // Outgoing player stops at their settled Post-End board; incoming player runs Start-Turn on their device
+      net.onTurnAdvancementComplete?.();
+      state.syncUI();
+      global.UICardsDeck?.syncMaterialsQueueColumn?.();
+      global.UICardsDeck?.syncSpellbookColumn?.();
+      global.BoardRenderer?.render?.();
+      return;
+    }
+
+    // Local / same-device multi-seat: immediately run this player's Start-Turn phase
+    this.startPlayerTurn();
+  };
+
+  /**
+   * Executes the active player's Start-Turn phase (Phases B through E):
+   * Disease growth, playfield spawns, enchantment expirations, sigil re-evaluation,
+   * tray unlock, and active material spawn animation.
+   */
+  proto.startPlayerTurn = function() {
+    const state = global.GameState;
+    const resolver = global.SigilResolver;
+    if (!state || state.gameOver || this.isStartingTurn) return;
+    if (global.TurnLogManager?.hasPendingEntries?.() || global.TurnLogPlayer?.active) return;
+
+    this.isEndingTurn = false;
+    this.isStartingTurn = true;
+    state.turnPhase = 'START_TURN';
+    state.placedThisTurn = true;
+    state.isMaterialSelected = false;
+    state.syncUI();
+    global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
+    global.BoardRenderer?.render?.();
+
     const onSpawnsAndGrowthFinished = () => {
       const currentPl = state.currentPlayerId || 1, expiringTiles = [];
       if (state.board) {
@@ -103,9 +153,11 @@
         }
       };
 
-      // Phase E: Refill tray, auto-select piece, and unlock board inputs
+      // Phase E: Refill tray, unlock controls into MID_TURN, and spawn active material for its owner
       const runPhaseE = () => {
+        this.isStartingTurn = false;
         this.isEndingTurn = false;
+        state.turnPhase = 'MID_TURN';
         state.refillTray();
         state.placedThisTurn = false;
         state.isMaterialSelected = true;
@@ -114,31 +166,25 @@
         state.upDownAxisState = 0;
         state.placementCursor = { q: 0, r: 0 };
 
-        // Sync canonical turn-start state to remote peers AFTER Phase E finalizes tray & piece state
-        global.NetworkP2PManager?.onTurnAdvancementComplete?.();
-
-        const isSpectatingRemote = !!(global.NetworkP2PManager?.isConnected?.() && !global.NetworkP2PManager.isLocalPlayersTurn());
-        if (isSpectatingRemote) {
-          state.isMaterialSelected = false;
-        } else {
-          const activeMat = state.getActiveMaterial ? state.getActiveMaterial() : null;
-          if (activeMat && activeMat.activeCoords && global.BoardRippleRenderer?.playMaterialSpawnPulse) {
-            const coordsWithColors = activeMat.activeCoords.map(([dq, dr], idx) => ({
-              q: (state.placementCursor?.q || 0) + dq,
-              r: (state.placementCursor?.r || 0) + dr,
-              color: activeMat.colors[idx] || 'blue'
-            }));
-            const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);
-            global.BoardRippleRenderer.playMaterialSpawnPulse(coordsWithColors, () => {
-              global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
-              state.syncUI();
-              global.UICardsDeck?.syncSpellbookColumnWithGameState?.();
-              global.BoardRenderer?.render?.();
-            }, h3Sec);
-          } else if (activeMat) {
+        const activeMat = state.getActiveMaterial ? state.getActiveMaterial() : null;
+        if (activeMat && activeMat.activeCoords && global.BoardRippleRenderer?.playMaterialSpawnPulse) {
+          const coordsWithColors = activeMat.activeCoords.map(([dq, dr], idx) => ({
+            q: (state.placementCursor?.q || 0) + dq,
+            r: (state.placementCursor?.r || 0) + dr,
+            color: activeMat.colors[idx] || 'blue'
+          }));
+          const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);
+          global.BoardRippleRenderer.playMaterialSpawnPulse(coordsWithColors, () => {
             global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
-          }
+            state.syncUI();
+            global.UICardsDeck?.syncSpellbookColumnWithGameState?.();
+            global.BoardRenderer?.render?.();
+          }, h3Sec);
+        } else if (activeMat) {
+          global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
         }
+
+        global.NetworkP2PManager?.onTurnAdvancementComplete?.();
 
         const pLabel = (state.playerCount > 1) ? `Player ${state.currentPlayerId || 1} • ` : '';
         state.showToast(`${pLabel}Round ${state.round} Begins`);
@@ -156,9 +202,7 @@
       }
     };
 
-    // 1. Collect existing Plague growth + scheduled Playfield Blight & Luck as one staggered wave
-    // 2. Execute Disease Growth -> Blight -> Luck with normal stagger compression
-    // 3. Trigger onSpawnsAndGrowthFinished (Phase C) after all items finish animating
+    // Phase B: Plague growth + Scheduled Playfield Blight & Luck
     const diseaseWave = global.ComponentDisease?.prepareTurnGrowth
       ? global.ComponentDisease.prepareTurnGrowth(state)
       : null;
@@ -203,8 +247,6 @@
     }
   };
 
-  // Register with global Roll Call
   window.ROLL_CALL = window.ROLL_CALL || new Map();
   window.ROLL_CALL.set('Turn_Manager_1.3', global.TurnManager);
-
 })(typeof window !== 'undefined' ? window : this);

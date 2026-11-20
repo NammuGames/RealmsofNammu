@@ -164,16 +164,19 @@
         this._drawBezelHex(ctx, math, x, y, hexRadius - 1.5, fill, stroke, cursorStyle);
       });
 
-      // Small vertex marker at mutual junction
+      // Small vertex marker at mutual junction (Dual-Pass Alpha, Zero Gaussian shadowBlur)
       if (style.showVertexMarker !== false && math.vertexToScreen) {
         const vPos = math.vertexToScreen(vertex, originX, originY, hexRadius);
         ctx.save();
+        ctx.globalAlpha = (ctx.globalAlpha || 1.0) * cAlpha * 0.30;
+        ctx.beginPath();
+        ctx.arc(vPos.x, vPos.y, 8.0, 0, Math.PI * 2);
+        ctx.fillStyle = stroke;
+        ctx.fill();
         ctx.globalAlpha = (ctx.globalAlpha || 1.0) * cAlpha;
         ctx.beginPath();
-        ctx.arc(vPos.x, vPos.y, 4.5, 0, Math.PI * 2);
+        ctx.arc(vPos.x, vPos.y, 4.2, 0, Math.PI * 2);
         ctx.fillStyle = '#ffffff';
-        ctx.shadowColor = stroke;
-        ctx.shadowBlur = 10;
         ctx.fill();
         ctx.restore();
       }

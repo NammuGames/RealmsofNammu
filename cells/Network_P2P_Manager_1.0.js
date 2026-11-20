@@ -136,7 +136,10 @@
         },
         onReconnect: () => {
           if (this.role === 'host') this._broadcastRoster?.();
-          else if (this.role === 'guest') this._sendHello();
+          else if (this.role === 'guest') {
+            this._sendHello();
+            if (global.GameState?.matchStarted) this.requestLogCatchUp?.();
+          }
           if (this._pendingSync?.msg) this._publishRoom(this._pendingSync.msg, '*');
           this._notifyLobbyUpdate?.();
         }

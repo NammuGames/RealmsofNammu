@@ -217,7 +217,9 @@
     }
 
     const isWeaving = !isPlaced && (g.activeMaterialMod === 'weave' || global.SpellWeave?.inWeaveMode);
-    const canEndTurn = !spellCursorsActive && !isWeaving;
+    const hasLogNext = !!(global.TurnLogManager?.hasPendingEntries?.() || global.TurnLogPlayer?.active);
+    const isTurnTransitionBusy = !!global.SpellManager?.isTurnTransitionBusy?.();
+    const canEndTurn = !spellCursorsActive && !isWeaving && !isTurnTransitionBusy;
     const isTurnPopupOpen = !!slot4Result?.isTurnPopupOpen;
 
     if (text5) {
@@ -237,6 +239,10 @@
       } else if (isSpellConfirm) {
         text5.title = 'Confirm';
         text5.titleColor = canConfirmSpell ? '#38bdf8' : '#64748b';
+        text5.hotkey = 'ENT';
+      } else if (hasLogNext) {
+        text5.title = 'Next';
+        text5.titleColor = '#ff9214';
         text5.hotkey = 'ENT';
       } else if (canEndTurn && hasResonance) {
         text5.title = 'Resonate';
@@ -263,6 +269,9 @@
       } else if (isSpellConfirm) {
         btnEndTurn.setGhost(!canConfirmSpell);
         btnEndTurn.setHighlight(canConfirmSpell);
+      } else if (hasLogNext) {
+        btnEndTurn.setGhost(false);
+        btnEndTurn.setHighlight(true);
       } else if (canEndTurn) {
         btnEndTurn.setGhost(false);
         btnEndTurn.setHighlight(isPlaced);

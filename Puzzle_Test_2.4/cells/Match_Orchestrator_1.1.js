@@ -58,6 +58,7 @@
     state.matchStarted = true;
     state.isMatchStarting = true;
     state.isMatchEnding = false;
+    state.turnPhase = 'START_TURN';
     state.placedThisTurn = true;
     state.isMaterialSelected = false;
     state.materialsTray = [];
@@ -65,6 +66,8 @@
     state.players = [];
     global.ComponentDisease?.reset?.();
     global.UndoManager?.clearTurnHistory?.();
+    global.TurnLogManager?.reset?.(global.MemoryCardManager?.activeMatchId || null);
+    global.TurnLogPlayer?.reset?.();
     if (global.BoardRenderer) {
       global.BoardRenderer.currentBoardRadius = targetRadius;
       global.BoardRenderer.resetCamera?.();
@@ -126,6 +129,7 @@
           const finishActivation = () => {
             if (!state.matchStarted) return;
             state.isMatchStarting = false;
+            state.turnPhase = 'MID_TURN';
             state.placedThisTurn = false;
             state.isMaterialSelected = true;
             state.selectedTrayIndex = 0;

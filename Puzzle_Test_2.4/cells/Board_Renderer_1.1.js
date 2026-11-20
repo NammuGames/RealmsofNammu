@@ -38,6 +38,7 @@
 
     this.elapsedTime += dt;
     this.pulseTime += 2.5 * dt;
+    global.TurnLogPlayer?.update?.();
 
     // Smooth 60 FPS Camera Lerp Interpolation
     if (global.COSMOS_STATE) {
@@ -280,7 +281,8 @@
 
       let renderR = compR;
       const animState = global.BoardRippleRenderer?.getTileAnimState?.(tile.q, tile.r);
-      let eAlpha = (animState && animState.enchantmentAlpha !== undefined) ? animState.enchantmentAlpha : 1.0;
+      const logAlpha = global.TurnLogPlayer?.getTileAlpha?.(tile.q, tile.r) ?? 1.0;
+      let eAlpha = ((animState && animState.enchantmentAlpha !== undefined) ? animState.enchantmentAlpha : 1.0) * logAlpha;
       if (global.BoardRippleRenderer?.isSigilDetonatingTile?.(tile.q, tile.r)) {
         eAlpha *= global.BoardRippleRenderer.getResonantSigilBackTileAlpha(`${tile.q},${tile.r}`);
       }
@@ -339,7 +341,7 @@
         if (renderR <= 0.01) continue;
       }
 
-      placedBatch.push({ cx: x, cy: y, radius: renderR, colorName: tile.color, seedPhase: tile.seedPhase, seedTilt: tile.seedTilt, customAlpha: animState ? animState.alpha : 1.0 });
+      placedBatch.push({ cx: x, cy: y, radius: renderR, colorName: tile.color, seedPhase: tile.seedPhase, seedTilt: tile.seedTilt, customAlpha: (animState ? animState.alpha : 1.0) * logAlpha });
     }
 
     // Placed components rendered in a single high-speed batch pass
@@ -347,6 +349,7 @@
       if (typeof global.PolyhedronRenderer.drawBatch === 'function') global.PolyhedronRenderer.drawBatch(ctx, placedBatch, this.elapsedTime);
       else placedBatch.forEach(it => global.PolyhedronRenderer.drawComponent(ctx, it.cx, it.cy, it.radius, it.colorName, this.elapsedTime, false, false, 1.0, it.seedPhase, it.seedTilt));
     }
+    global.TurnLogPlayer?.renderOutgoingComponents?.(ctx, math, this.originX, this.originY, this.hexRadius, this.elapsedTime);
 
     // 4. RENDER OUT-OF-BOUNDS DAMAGE SEGMENTS PLACED THIS TURN
     if (state.activeDamageTiles && state.activeDamageTiles.length > 0) {
@@ -390,10 +393,12 @@
           global.PolyhedronRenderer.drawComponent(ctx, p.x, p.y, uRadius, p.tile.underneath.color, this.elapsedTime, false, false, uAlpha, p.tile.seedPhase, p.tile.seedTilt);
         }
         let eAlpha = (animState && animState.enchantmentAlpha !== undefined) ? animState.enchantmentAlpha : 1.0;
+        const oLogAlpha = global.TurnLogPlayer?.getTileAlpha?.(p.tile.q, p.tile.r) ?? 1.0;
+        eAlpha *= oLogAlpha;
         if (global.BoardRippleRenderer?.isSigilDetonatingTile?.(p.tile.q, p.tile.r)) {
           eAlpha *= global.BoardRippleRenderer.getResonantSigilBackTileAlpha(`${p.tile.q},${p.tile.r}`);
         }
-        const compAlpha = (animState && animState.alpha !== undefined) ? animState.alpha : 1.0;
+        const compAlpha = ((animState && animState.alpha !== undefined) ? animState.alpha : 1.0) * oLogAlpha;
         const isCopied = !!(global.SpellRitual?.inRitualMode && global.SpellRitual?.copiedTileKeys?.has(`${p.tile.q},${p.tile.r}`));
         const bezelCol = isCopied ? '#38bdf8' : (p.tile.burned ? '#ef4444' : '#2563eb');
         const pRadius = (isCopied ? this.hexRadius * (global.COSMOS_STATE?.unplacedScale || 0.90) : p.compR) * animScale;

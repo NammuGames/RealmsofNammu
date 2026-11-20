@@ -212,7 +212,9 @@
 
       const backW = Math.max(1, Math.round(cssW * dpr));
       const backH = Math.max(1, Math.round(cssH * dpr));
-      const warpScale = this.state?.warpRenderScale || 0.75;
+      const isCoarseMobile = global.matchMedia?.('(pointer: coarse)')?.matches || Math.min(cssW, cssH) <= 560;
+      const baseWarpScale = this.state?.warpRenderScale || 0.75;
+      const warpScale = (isCoarseMobile && baseWarpScale >= 0.7) ? 0.45 : baseWarpScale;
 
       // Enforce Landscape-Only: never CSS-rotate #canvas-board-overlay sideways
       if (canvasBoard) {

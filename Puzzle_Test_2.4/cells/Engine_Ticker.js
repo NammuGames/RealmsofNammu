@@ -24,6 +24,7 @@
       this.FIXED_DT = 1.0 / 60.0;
       this.lastTime = 0;
       this.accumulator = 0.0;
+      this.lastRenderMs = 0;
       this.frameCount = 0;
       this.lastFpsUpdate = 0;
       this.cpuTimeAvg = 0.85;
@@ -67,6 +68,10 @@
     }
 
     tick(now) {
+      if (typeof document !== 'undefined' && document.hidden) {
+        this.lastTime = now;
+        return;
+      }
       const state = this.state;
       const dom = this.dom;
       const warp = this.warp;
@@ -92,7 +97,6 @@
 
         if (cameraCtrl) cameraCtrl.update();
         if (deck) deck.updateRightSidebarDeck();
-        if (deckSync) deckSync.syncMaterialsTrayWithGameState();
         if (global.TweenOrchestrator) global.TweenOrchestrator.update(this.FIXED_DT);
 
         this.accumulator = Math.max(0, this.accumulator - this.FIXED_DT);
@@ -101,7 +105,17 @@
 
       if (!didTick) return;
 
-      // 2. Render Pass: Synchronized with 60Hz Tick
+      // Mobile Power Saver: cap rendering at 30 FPS on touch/mobile viewports to cut heat & battery drain
+      const isMobileRender = (typeof window !== 'undefined') && (
+        window.matchMedia?.('(pointer: coarse)')?.matches ||
+        global.ResponsiveViewportAdapter?.viewportClass === 'compact-landscape'
+      );
+      if (isMobileRender && this.lastRenderMs && (now - this.lastRenderMs) < 32.0) {
+        return;
+      }
+      this.lastRenderMs = now;
+
+      // 2. Render Pass
       const frameStart = performance.now();
 
       // Layer -1: WebGL Cosmic Domain Warp & Stars
@@ -126,7 +140,7 @@
       const cpuFrameMs = frameEnd - frameStart;
       this.cpuTimeAvg = this.cpuTimeAvg * 0.85 + cpuFrameMs * 0.15;
 
-      // FPS Meter (1Hz)
+      // FPS Meter (1Hz - only update DOM when dev drawers enabled)
       this.frameCount++;
       if (now - this.lastFpsUpdate >= 1000) {
         const elapsed = now - this.lastFpsUpdate;
@@ -134,21 +148,25 @@
         const avgFrameMs = elapsed / Math.max(1, this.frameCount);
         this.actualFps = fps;
 
-        if (dom.valFps) dom.valFps.textContent = fps.toString();
-        if (dom.lblActualFps) dom.lblActualFps.textContent = `${fps} FPS`;
-        if (dom.barActualFps) dom.barActualFps.style.width = `${Math.min(100, Math.max(1, (fps / 120) * 100))}%`;
-        if (dom.lblActualInterval) dom.lblActualInterval.textContent = `${avgFrameMs.toFixed(1)} ms`;
+        if (global.__NAMMU_DEV_DRAWERS__) {
+          if (dom.valFps) dom.valFps.textContent = fps.toString();
+          if (dom.lblActualFps) dom.lblActualFps.textContent = `${fps} FPS`;
+          if (dom.barActualFps) dom.barActualFps.style.width = `${Math.min(100, Math.max(1, (fps / 120) * 100))}%`;
+          if (dom.lblActualInterval) dom.lblActualInterval.textContent = `${avgFrameMs.toFixed(1)} ms`;
+        }
 
         this.frameCount = 0;
         this.lastFpsUpdate = now;
       }
 
-      // Silicon & Memory Telemetry Update (4Hz / 250ms)
+      // 4Hz State Sync + Optional Silicon Telemetry Update
       if (now - this.lastTelemetryUpdate >= 250) {
         this.lastTelemetryUpdate = now;
         if (deckSync) {
+          deckSync.syncMaterialsTrayWithGameState();
           deckSync.syncNativeStatPodWithGameState();
         }
+        if (!global.__NAMMU_DEV_DRAWERS__) return;
 
         // 1. CPU Telemetry
         const cpuLoadPct = Math.min(100, (this.cpuTimeAvg / 16.666) * 100);

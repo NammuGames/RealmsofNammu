@@ -220,13 +220,10 @@
       : `rgba(203, 213, 225, ${0.7 + pulse * 0.3})`;
     const baseStrokeWidth = isOffBoard ? 2.5 : 1.5;
 
-    if (isOffBoard) {
-      ctx.shadowColor = '#ef4444';
-      ctx.shadowBlur = 10;
-    } else {
-      ctx.shadowColor = 'rgba(255, 255, 255, 0.45)';
-      ctx.shadowBlur = 6;
-    }
+    // Dual-pass outer aura stroke (Zero Gaussian shadowBlur for mobile GPU efficiency)
+    ctx.globalAlpha = 0.25;
+    hexMath.drawHexagon(ctx, x, y, radius - 0.5, null, isOffBoard ? '#ef4444' : '#ffffff', baseStrokeWidth + 4.5);
+    ctx.globalAlpha = 1.0;
 
     hexMath.drawHexagon(ctx, x, y, radius - 1.5, baseFill, baseStroke, baseStrokeWidth);
     ctx.restore();
@@ -245,8 +242,6 @@
     ctx.font = `900 ${Math.round(radius * 0.5)}px monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.shadowColor = isOffBoard ? '#ef4444' : 'rgba(255, 255, 255, 0.8)';
-    ctx.shadowBlur = 3;
     ctx.fillText('☣', x, y);
     ctx.restore();
   };

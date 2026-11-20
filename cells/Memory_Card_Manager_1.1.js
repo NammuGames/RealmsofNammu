@@ -76,6 +76,7 @@
       maxHp: g.maxHp,
       pendingHeal: g.pendingHeal || 0,
       gameOver: !!g.gameOver,
+      turnPhase: g.turnPhase || 'MID_TURN',
       placedThisTurn: !!g.placedThisTurn,
       isMaterialSelected: !!g.isMaterialSelected,
       selectedTrayIndex: g.selectedTrayIndex || 0,
@@ -90,7 +91,8 @@
       presetName: g.matchConfig?.presetName || existing?.presetName || 'Meditate',
       boardTiles,
       players: deepClone(g.players || []),
-      disease: diseaseData
+      disease: diseaseData,
+      turnLog: global.TurnLogManager?.exportState?.() || null
     };
   };
 
@@ -222,11 +224,15 @@
     g.upDownAxisState = snap.upDownAxisState || 0;
     g.placementCursor = deepClone(snap.placementCursor || { q: 0, r: 0 });
     g.gameOver = !!snap.gameOver;
+    g.turnPhase = snap.turnPhase || 'MID_TURN';
     g.matchStarted = true;
     g.isMatchStarting = false;
     g.isMatchEnding = false;
     g.isSequentialPlacing = false;
-    if (global.TurnManager) global.TurnManager.isEndingTurn = false;
+    if (global.TurnManager) {
+      global.TurnManager.isEndingTurn = false;
+      global.TurnManager.isStartingTurn = false;
+    }
 
     if (global.ComponentDisease) {
       global.ComponentDisease.reset();
@@ -253,7 +259,9 @@
     const net = global.NetworkP2PManager;
     const isOnline = !!net?.isConnected?.();
     const isMyTurn = !isOnline || net.isLocalPlayersTurn();
-    if (!g.placedThisTurn && !g.gameOver) {
+    if (g.turnPhase === 'START_TURN') {
+      g.isMaterialSelected = false;
+    } else if (!g.placedThisTurn && !g.gameOver) {
       if (isMyTurn) {
         if ((!g.materialsTray || !g.materialsTray.length || !g.getActiveMaterial?.()) && typeof g.refillTray === 'function') {
           g.refillTray();
@@ -264,16 +272,24 @@
       }
     }
 
+    const needCamReset = !this._lastRestoredMatchId || this._lastRestoredMatchId !== snap.id || global.BoardRenderer?.currentBoardRadius !== g.boardRadius;
+    this._lastRestoredMatchId = snap.id || null;
     if (global.BoardRenderer) {
       global.BoardRenderer.currentBoardRadius = g.boardRadius;
-      global.BoardRenderer.resetCamera?.();
+      if (needCamReset) global.BoardRenderer.resetCamera?.();
     }
     this.activeMatchId = snap.id || this.activeMatchId;
+    if (snap.turnLog && global.TurnLogManager?.importState) {
+      global.TurnLogManager.importState(snap.turnLog);
+    }
     g.evaluateSigils?.();
     g.syncUI();
     global.UICardsDeck?.syncMaterialsQueueColumn?.();
     global.UICardsDeck?.syncSpellbookColumn?.();
     global.BoardRenderer?.render?.();
+    if (isMyTurn && g.turnPhase === 'START_TURN' && !g.gameOver && global.TurnManager?.startPlayerTurn) {
+      setTimeout(() => global.TurnManager.startPlayerTurn(), 60);
+    }
     return true;
   };
 })(typeof window !== 'undefined' ? window : this);

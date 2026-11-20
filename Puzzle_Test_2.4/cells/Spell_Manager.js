@@ -130,7 +130,12 @@
         !state?.matchStarted ||
         state?.isMatchStarting ||
         state?.isMatchEnding ||
+        state?.turnPhase === 'START_TURN' ||
+        state?.turnPhase === 'END_TURN' ||
         global.TurnManager?.isEndingTurn ||
+        global.TurnManager?.isStartingTurn ||
+        global.TurnLogPlayer?.active ||
+        global.TurnLogManager?.hasPendingEntries?.() ||
         state?.isSequentialPlacing ||
         global.BoardRippleRenderer?.materialSpawnAnim
       );

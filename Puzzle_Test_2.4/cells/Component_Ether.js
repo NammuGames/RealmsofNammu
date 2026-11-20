@@ -297,8 +297,7 @@
       const baseStrokeWidth = activeColor ? 2.5 : 1.5;
 
       if (activeColor) {
-        ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
-        ctx.shadowBlur = 10;
+        hexMath.drawHexagon(ctx, x, y, radius - 1.5, null, 'rgba(255, 255, 255, 0.22)', baseStrokeWidth + 5);
       }
       hexMath.drawHexagon(ctx, x, y, radius - 1.5, baseFill, baseStroke, baseStrokeWidth);
       ctx.restore();
@@ -331,20 +330,21 @@
         if (activeSub) {
           ctx.save();
           const enlargedRadius = radius * 0.58;
-          ctx.shadowColor = activeSub.glow;
-          ctx.shadowBlur = 14;
-          // Positioned slightly pulled toward center
+          // Positioned slightly pulled toward center (Dual-Pass Alpha Halo, Zero Gaussian shadowBlur)
           const activeX = x + activeSub.dx * 0.35;
           const activeY = y + activeSub.dy * 0.35;
+          ctx.globalAlpha = 0.28;
+          hexMath.drawHexagon(ctx, activeX, activeY, enlargedRadius + 2.5, null, activeSub.glow, 6);
+          ctx.globalAlpha = 1.0;
           hexMath.drawHexagon(ctx, activeX, activeY, enlargedRadius, activeSub.hex, '#ffffff', 2.5);
 
           // Star / Wild glyph in center of dominant element
-          ctx.fillStyle = '#ffffff';
           ctx.font = `bold ${Math.round(enlargedRadius * 0.8)}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.shadowColor = '#000000';
-          ctx.shadowBlur = 3;
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+          ctx.fillText('✦', activeX + 0.8, activeY + 0.8);
+          ctx.fillStyle = '#ffffff';
           ctx.fillText('✦', activeX, activeY);
           ctx.restore();
         }
@@ -355,8 +355,6 @@
         ctx.font = `bold ${Math.round(radius * 0.32)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.shadowColor = '#38bdf8';
-        ctx.shadowBlur = 6;
         ctx.fillText('✦', x, y);
         ctx.restore();
       }

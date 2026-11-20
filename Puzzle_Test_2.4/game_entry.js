@@ -33,6 +33,8 @@
     'cells/Turn_Manager_1.2.js',
     'cells/Turn_Manager_1.3.js',
     'cells/Turn_Manager.js',
+    'cells/Turn_Log_Manager.js',
+    'cells/Turn_Log_Player.js',
     'cells/Last_Breath_Manager_1.0.js',
     'cells/Last_Breath_Manager_1.1.js',
     'cells/Last_Breath_Manager.js',

@@ -118,7 +118,8 @@
           expAlpha *= burnAlpha;
           emblemScale *= burnAlpha;
         }
-        if (emblemScale <= 0.001) return;
+        expAlpha *= (global.TurnLogPlayer?.getSigilAlpha?.(sigil.id) ?? 1.0);
+        if (emblemScale <= 0.001 || expAlpha <= 0.001) return;
 
         const elemInfo = this._getElemInfo(sigil.element);
         if (!sigil.vertex && math.findVertexForTiles) sigil.vertex = math.findVertexForTiles(sigil.tiles);
@@ -136,6 +137,7 @@
           ctx.restore();
         }
       });
+      global.TurnLogPlayer?.renderOutgoingSigils?.(ctx, math, originX, originY, hexRadius);
     }
 
     /**
@@ -211,6 +213,7 @@
           ctx.restore();
         }
       });
+      global.TurnLogPlayer?.renderOutgoingSigils?.(ctx, math, originX, originY, hexRadius);
     }
   }
 

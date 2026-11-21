@@ -46,6 +46,8 @@
       this.overlayScale = 1.0;
       this._initialized = false;
       this._wrappedEngine = false;
+      this._wantsLandscapeFullscreen = false;
+      this._lastIsPortrait = undefined;
     }
 
     init(ctx = {}) {
@@ -145,6 +147,37 @@
       this.overlayEl = el;
     }
 
+    _isFullscreenActive() {
+      if (typeof document === 'undefined') return false;
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
+    _requestMobileFullscreen() {
+      if (typeof document === 'undefined' || this._isFullscreenActive()) {
+        this._wantsLandscapeFullscreen = false;
+        return;
+      }
+      const root = document.documentElement;
+      const req = root?.requestFullscreen || root?.webkitRequestFullscreen;
+      if (typeof req !== 'function') return;
+      try {
+        const res = req.call(root, { navigationUI: 'hide' });
+        if (res && typeof res.then === 'function') {
+          res.then(() => { this._wantsLandscapeFullscreen = false; }).catch(() => {});
+        }
+      } catch (_) {}
+    }
+
+    _exitMobileFullscreen() {
+      if (typeof document === 'undefined' || !this._isFullscreenActive()) return;
+      const exitFn = document.exitFullscreen || document.webkitExitFullscreen;
+      if (typeof exitFn !== 'function') return;
+      try {
+        const res = exitFn.call(document);
+        if (res && typeof res.catch === 'function') res.catch(() => {});
+      } catch (_) {}
+    }
+
     _bindEvents() {
       if (typeof window === 'undefined') return;
       const scheduleSync = () => {
@@ -154,16 +187,25 @@
       };
       window.addEventListener('resize', scheduleSync);
       window.addEventListener('orientationchange', scheduleSync);
+      document.addEventListener('fullscreenchange', () => {
+        if (this._isFullscreenActive()) this._wantsLandscapeFullscreen = false;
+        scheduleSync();
+      });
+      document.addEventListener('webkitfullscreenchange', () => {
+        if (this._isFullscreenActive()) this._wantsLandscapeFullscreen = false;
+        scheduleSync();
+      });
       global.visualViewport?.addEventListener('resize', scheduleSync);
       global.visualViewport?.addEventListener('scroll', scheduleSync);
 
-      // Best-effort native orientation lock when interacting on supported mobile browsers
-      const tryLockLandscape = () => {
-        if (global.matchMedia?.('(pointer: coarse)')?.matches && global.screen?.orientation?.lock) {
-          global.screen.orientation.lock('landscape').catch(() => {});
+      // Mobile browsers require a user gesture to enter fullscreen if orientationchange was blocked
+      const onMobileGesture = () => {
+        if (this._wantsLandscapeFullscreen && !this.isPortrait && !this._isFullscreenActive()) {
+          this._requestMobileFullscreen();
         }
       };
-      window.addEventListener('pointerdown', tryLockLandscape, { passive: true, once: true });
+      window.addEventListener('pointerdown', onMobileGesture, { passive: true });
+      window.addEventListener('touchend', onMobileGesture, { passive: true });
     }
 
     _hookEngineResize() {
@@ -198,7 +240,9 @@
       const cssH = Math.max(180, Math.round((rect && rect.height > 0 ? rect.height : 0) || global.visualViewport?.height || global.innerHeight || 720));
       this.isPortrait = cssH > cssW;
 
-      const dpr = Math.min(MAX_DPR, Math.max(1, global.devicePixelRatio || 1));
+      const isCoarseMobile = global.matchMedia?.('(pointer: coarse)')?.matches || Math.min(cssW, cssH) <= 560;
+      const dprCap = isCoarseMobile ? 1 : MAX_DPR;
+      const dpr = Math.min(dprCap, Math.max(1, global.devicePixelRatio || 1));
       const stageScale = Math.min(1.0, cssW / VIRTUAL_BASE_W, cssH / VIRTUAL_BASE_H);
       const virtualW = cssW / stageScale;
       const virtualH = cssH / stageScale;
@@ -212,9 +256,19 @@
 
       const backW = Math.max(1, Math.round(cssW * dpr));
       const backH = Math.max(1, Math.round(cssH * dpr));
-      const isCoarseMobile = global.matchMedia?.('(pointer: coarse)')?.matches || Math.min(cssW, cssH) <= 560;
+      const prevPortrait = this._lastIsPortrait;
+      this._lastIsPortrait = this.isPortrait;
+      if (isCoarseMobile) {
+        if (this.isPortrait) {
+          this._wantsLandscapeFullscreen = false;
+          this._exitMobileFullscreen();
+        } else if (prevPortrait === true || prevPortrait === undefined) {
+          this._wantsLandscapeFullscreen = true;
+          this._requestMobileFullscreen();
+        }
+      }
       const baseWarpScale = this.state?.warpRenderScale || 0.75;
-      const warpScale = (isCoarseMobile && baseWarpScale >= 0.7) ? 0.45 : baseWarpScale;
+      const warpScale = (isCoarseMobile && baseWarpScale >= 0.7) ? 0.25 : baseWarpScale;
 
       // Enforce Landscape-Only: never CSS-rotate #canvas-board-overlay sideways
       if (canvasBoard) {

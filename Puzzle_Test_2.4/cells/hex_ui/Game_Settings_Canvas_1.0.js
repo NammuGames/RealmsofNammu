@@ -20,6 +20,8 @@
       this.mode = 'setup'; // 'setup' | 'pause'
       this.history = [];   // Stack of { title, renderFn }
       this.activePresetDraft = null; // Working isolated draft for preset editing
+      this._pendingDeleteIds = new Set();
+      this._pendingDeleteCommit = null;
 
       // Standard Menu Layout Dimensions (Mirrors Stat Canvas Pods)
       this.dims = { headerW: 640, headerH: 72, headerApex: 22, headerSpacing: 20, podW: 870, podH: 154, podApex: 42, podSpacing: 12 };
@@ -194,12 +196,32 @@
       global.BoardRenderer?.render?.();
     }
 
+    clearPendingDeletions() {
+      this._pendingDeleteIds?.clear?.();
+      this._pendingDeleteCommit = null;
+      this._isMatchDeleteMode = false;
+      this.isPresetDeleteMode = false;
+      this._presetDeleteCategory = null;
+    }
+
+    commitPendingDeletions() {
+      const hasIds = this._pendingDeleteIds && this._pendingDeleteIds.size > 0;
+      const fn = this._pendingDeleteCommit;
+      if (hasIds && typeof fn === 'function') {
+        const ids = new Set(this._pendingDeleteIds);
+        this.clearPendingDeletions();
+        fn(ids);
+        return true;
+      }
+      this.clearPendingDeletions();
+      return false;
+    }
+
     close(onDone) {
       if ((!this.active && !this.containerNode?.visible) || this.isAnimating()) return;
       this.active = false;
       this.activePresetDraft = null;
-      this.isPresetDeleteMode = false;
-      this._presetDeleteCategory = null;
+      this.clearPendingDeletions();
       if (global.GameSettingsRenamePopup?.isOpen?.()) global.GameSettingsRenamePopup.close(true);
 
       const topEntry = this.history[this.history.length - 1];

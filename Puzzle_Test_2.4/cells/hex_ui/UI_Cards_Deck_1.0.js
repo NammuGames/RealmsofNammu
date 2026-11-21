@@ -207,10 +207,19 @@
       }
     }
 
+    _getSpectatorContext() {
+      const g = global.GameState, net = global.NetworkP2PManager;
+      const isSpectating = !!(net?.isConnected?.() && !net.isLocalPlayersTurn());
+      if (!isSpectating) return { isSpectating: false, povPlayer: null };
+      const povIdx = net.getDefaultPausedPlayerIndex ? net.getDefaultPausedPlayerIndex() : (g?.activePlayerIndex || 0);
+      return { isSpectating: true, povPlayer: g?.players?.[povIdx] || null };
+    }
+
     syncSpellbookColumnWithGameState() {
       if (!this.colSpellbook || !this.spellButtonNodes) return;
       const g = global.GameState;
-      const book = g?.spellbook || [];
+      const { isSpectating, povPlayer } = this._getSpectatorContext();
+      const book = isSpectating ? (povPlayer?.spellbook || []) : (g?.spellbook || []);
       const isSpellActive = !!(
         g?.inArchMode || global.SpellArch?.inArchMode ||
         g?.inShiftMode || global.SpellShift?.inShiftMode ||
@@ -231,6 +240,7 @@
           const spell = book[i];
           const elemKey = (spell.element || 'fire').toLowerCase();
           const elemInfo = ELEMENT_INFO_MAP[elemKey] || { key: 'fire', color: '#ff3333', sec: '#ffffff' };
+          const isSeek = (spell.formula === 'YYR' || String(spell.name || '').toLowerCase() === 'seek');
 
           btnNode.visible = true;
           btnNode.spellData = spell;
@@ -241,7 +251,7 @@
           btnNode.style.innerHighlight.color = '#10f000';
           btnNode.style.innerHighlight.sharpEdgeColor = '#10f000';
           btnNode.style.outerHighlight.enabled = false;
-          btnNode.setGhost(isSpellActive);
+          btnNode.setGhost(isSpectating ? !isSeek : isSpellActive);
           if (global.BorderTuningLab?.applyGroupStyle) global.BorderTuningLab.applyGroupStyle(btnNode, 'group-buttons');
           if (typeof btnNode.invalidateCache === 'function') btnNode.invalidateCache();
         } else {
@@ -254,6 +264,24 @@
 
     castSpellSlot(slotIndex) {
       const g = global.GameState;
+      const { isSpectating, povPlayer } = this._getSpectatorContext();
+      if (isSpectating) {
+        const targetSpell = povPlayer?.spellbook?.[slotIndex];
+        const isSeek = !!(targetSpell && (targetSpell.formula === 'YYR' || String(targetSpell.name || '').toLowerCase() === 'seek'));
+        if (isSeek) {
+          this.spectatorSeekPeek = true;
+          global.AudioSynth?.playConfirm?.(targetSpell.formula || 'YYR');
+          global.UISidebarDeck?.openMaterialsColumn?.(true);
+          g?.showToast?.('🔮 CYBER SEEK (View Only): Previewing your upcoming Material Tray.');
+          this.syncMaterialsQueueColumn?.();
+          global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
+          global.BoardRenderer?.render?.();
+          return true;
+        }
+        global.AudioSynth?.playCancel?.();
+        g?.showToast?.('👀 Spectating — spells can only be cast on your turn.');
+        return false;
+      }
       if (global.SpellManager?.isTurnTransitionBusy?.()) {
         global.AudioSynth?.playCancel?.();
         g?.showToast?.('⏳ Wait for Start/End Turn animations to finish before casting spells!');

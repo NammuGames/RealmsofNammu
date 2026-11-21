@@ -207,7 +207,10 @@
         else if (g?.inManifestMode) global.SpellManifest?.handleUndo?.();
         else if (typeof this.closeComponentsColumn === 'function') this.closeComponentsColumn();
       } else if (this.state.rightSidebarActiveCol === 2) {
-        if (g?.inForesightMode) {
+        if (global.UICardsDeck?.spectatorSeekPeek) {
+          global.UICardsDeck.spectatorSeekPeek = false;
+          if (typeof this.openSpellbookColumn === 'function') this.openSpellbookColumn(false);
+        } else if (g?.inForesightMode) {
           if (global.SpellForesight?.handleUndo) global.SpellForesight.handleUndo();
           else g.cancelForesightSwap();
         } else if (this.materialsOpenedFromCol === 1) {
@@ -378,11 +381,18 @@
             }
           }
         }
+        const committed = global.GameSettingsCanvas.commitPendingDeletions?.();
         global.GameSettingsCanvas.popColumn();
+        if (committed) global.GameSettingsCanvas.buildScene?.();
         return;
       }
       if (this.state.rightSidebarActiveCol === 1) {
         if (typeof this.closeSpellbookColumn === 'function') this.closeSpellbookColumn();
+        return;
+      }
+      if (this.state.rightSidebarActiveCol === 2 && global.UICardsDeck?.spectatorSeekPeek) {
+        global.UICardsDeck.spectatorSeekPeek = false;
+        if (typeof this.closeMaterialsColumn === 'function') this.closeMaterialsColumn();
         return;
       }
       if (global.TurnLogManager?.hasPendingEntries?.() || global.TurnLogPlayer?.active) {

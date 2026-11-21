@@ -200,7 +200,7 @@
             const origDown = trait.handlePointerDown.bind(trait);
             trait.handlePointerDown = () => { origDown(); const p = parentPod.getTrait('button'); if (p) p.state = 'pressed'; };
             const origUp = trait.handlePointerUp.bind(trait);
-            trait.handlePointerUp = (inside) => { origUp(inside); const p = parentPod.getTrait('button'); if (p) p.state = inside ? 'hovered' : 'idle'; };
+            trait.handlePointerUp = (inside, isTouch = false) => { origUp(inside, isTouch); const p = parentPod.getTrait('button'); if (p) p.state = (inside && !isTouch) ? 'hovered' : 'idle'; };
             trait.onHover = (h) => { const p = parentPod.getTrait('button'); if (p) p.state = h ? 'hovered' : 'idle'; };
           }
           node.addTrait(trait);

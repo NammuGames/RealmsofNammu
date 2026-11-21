@@ -72,10 +72,25 @@
       `;
 
       // 3. Fragment Shader (Domain Warp + Caustics + Deep Stars + Aerosol Vapor)
+      // Mobile uses mediump float for higher GPU ALU throughput, keeping highp for uTime and star hash.
+      const precisionHeader = isMobile
+        ? `
+          #ifdef GL_FRAGMENT_PRECISION_HIGH
+          precision mediump float;
+          #define HP highp
+          #else
+          precision mediump float;
+          #define HP
+          #endif
+        `
+        : `
+          precision highp float;
+          #define HP highp
+        `;
       const warpFs = `
-        precision highp float;
+        ${precisionHeader}
         uniform vec2 uRes;
-        uniform float uTime;
+        uniform HP float uTime;
         uniform float uDensity;
         uniform vec2 uPan;
         uniform float uCaustic;
@@ -174,14 +189,15 @@
             vec2 iCell = floor(sUV);
             vec2 fCell = fract(sUV);
             
-            vec2 hash = fract(sin(vec2(dot(iCell, vec2(127.1, 311.7)), dot(iCell, vec2(269.5, 183.3)))) * 43758.5453);
+            HP vec2 hCell = iCell;
+            HP vec2 hash = fract(sin(vec2(dot(hCell, vec2(127.1, 311.7)), dot(hCell, vec2(269.5, 183.3)))) * 43758.5453);
             vec2 starPos = hash * 0.70 + 0.15;
             vec2 delta = fCell - starPos;
             float dist = length(delta);
             
             // Serene slow twinkling for deep cosmic field
-            float twSpeed = (hash.x * 1.8 + 0.6) * uDeepFreq;
-            float twPhase = hash.y * 6.28318;
+            HP float twSpeed = (hash.x * 1.8 + 0.6) * uDeepFreq;
+            HP float twPhase = hash.y * 6.28318;
             float twinkle = sin(uTime * twSpeed + twPhase) * 0.5 + 0.5;
             twinkle = pow(twinkle, 2.0);
             

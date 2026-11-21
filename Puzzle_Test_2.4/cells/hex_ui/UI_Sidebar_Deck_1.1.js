@@ -77,6 +77,7 @@
   };
 
   Proto.closeMaterialsColumn = function(silent = false) {
+    if (global.UICardsDeck) global.UICardsDeck.spectatorSeekPeek = false;
     this.materialsOpenedFromCol = 0;
     this.state.rightSidebarActiveCol = 0;
     this.state.rightSidebarTargetSlideX = 0;
@@ -106,12 +107,15 @@
   };
 
   Proto.openSpellbookColumn = function() {
+    if (global.UICardsDeck) global.UICardsDeck.spectatorSeekPeek = false;
     const g = global.GameState;
-    if (global.SpellManager?.isTurnTransitionBusy?.()) {
+    const net = global.NetworkP2PManager;
+    const isSpectating = !!(net?.isConnected?.() && !net.isLocalPlayersTurn());
+    if (!isSpectating && global.SpellManager?.isTurnTransitionBusy?.()) {
       g?.showToast?.('⏳ Wait for Start/End Turn animations to finish!');
       return;
     }
-    const isSpellActive = !!(
+    const isSpellActive = !isSpectating && !!(
       g?.inArchMode || global.SpellArch?.inArchMode ||
       g?.inShiftMode || global.SpellShift?.inShiftMode ||
       g?.inRitualMode || global.SpellRitual?.inRitualMode ||
@@ -151,6 +155,7 @@
   };
 
   Proto.closeSpellbookColumn = function(silent = false) {
+    if (global.UICardsDeck) global.UICardsDeck.spectatorSeekPeek = false;
     this.state.rightSidebarActiveCol = 0;
     this.state.rightSidebarTargetSlideX = 0;
     if (this.colControls) {

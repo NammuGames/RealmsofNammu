@@ -93,8 +93,11 @@
     const isExclusiveList = (categoryLabel === 'Match' || categoryLabel === 'Luck' || categoryLabel === 'Blight');
     const isDeleteMode = !!self.isPresetDeleteMode && (self._presetDeleteCategory === categoryLabel);
     const isVectorCategory = (categoryLabel === 'String' || categoryLabel === 'Strain');
+    const pendingDel = self._pendingDeleteIds || (self._pendingDeleteIds = new Set());
+    const keyOf = (it, i) => it?.id || `${categoryLabel}_${i}`;
+    const visibleEntries = list.map((item, idx) => ({ item, idx, key: keyOf(item, idx) })).filter(e => !pendingDel.has(e.key));
 
-    const items = list.map((item, idx) => {
+    const items = visibleEntries.map(({ item, idx, key }) => {
       const isChosen = isExclusiveList && (idx === activeIdx);
       const numStr = item.tagNumber || String(idx + 1).padStart(3, '0');
       const tag = `${categoryLabel} ${numStr}`;
@@ -114,30 +117,27 @@
         isDoubleBorder: isDouble,
         onClick: () => {
           if (isDeleteMode) {
-            if (list.length <= 1) {
+            if (visibleEntries.length <= 1) {
               global.GameState?.showToast?.(`⚠️ Cannot delete the only remaining ${categoryLabel}!`);
               return;
             }
-            if (global.TurnConfirmPopup?.open) {
-              global.TurnConfirmPopup.open(() => {
-                list.splice(idx, 1);
-                let newIdx = activeIdx;
-                if (idx < activeIdx) {
-                  newIdx = activeIdx - 1;
-                } else if (idx === activeIdx) {
-                  if (newIdx >= list.length) newIdx = list.length - 1;
+            pendingDel.add(key);
+            self._pendingDeleteCommit = (ids) => {
+              const activeItem = list[activeIdx];
+              let count = 0;
+              for (let k = list.length - 1; k >= 0; k--) {
+                if (ids.has(keyOf(list[k], k)) && list.length > 1) {
+                  list.splice(k, 1);
+                  count++;
                 }
-                if (newIdx < 0) newIdx = 0;
-                if (typeof onSelect === 'function') onSelect(newIdx);
-                self.isPresetDeleteMode = false;
-                self._presetDeleteCategory = null;
-                global.GameState?.showToast?.(`✦ Deleted ${categoryLabel}: "${item.name}"`);
-                self.buildScene();
-              }, {
-                title: `Delete ${categoryLabel} — Are You Sure?`,
-                frameColor: '#ff3333'
-              });
-            }
+              }
+              const foundIdx = activeItem ? list.indexOf(activeItem) : -1;
+              const newIdx = foundIdx >= 0 ? foundIdx : Math.max(0, Math.min(list.length - 1, activeIdx));
+              if (typeof onSelect === 'function') onSelect(newIdx);
+              if (count > 0) global.GameState?.showToast?.(`✦ Deleted ${count} ${categoryLabel}${count > 1 ? 's' : ''}`);
+            };
+            global.GameState?.showToast?.(`⏳ Staged "${item.name}" for deletion — press Confirm to finalize or Return to cancel`);
+            self.buildScene();
           } else {
             self.isPresetDeleteMode = false;
             self._presetDeleteCategory = null;

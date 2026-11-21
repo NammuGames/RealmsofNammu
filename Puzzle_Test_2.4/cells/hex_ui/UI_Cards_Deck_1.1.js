@@ -122,8 +122,9 @@
     if (!this.colMaterials || !this.materialsButtonNodes) return;
     const g = global.GameState;
     if (!g) return;
-    const tray = g.materialsTray || g.materialTray || [];
-    const inForesight = !!g.inForesightMode;
+    const { isSpectating, povPlayer } = this._getSpectatorContext ? this._getSpectatorContext() : { isSpectating: false, povPlayer: null };
+    const tray = isSpectating ? (povPlayer?.materialsTray || []) : (g.materialsTray || g.materialTray || []);
+    const inForesight = !isSpectating && !!g.inForesightMode;
     const swappedIdx = g.foresightSwappedIndex;
     const hasSwapped = inForesight && swappedIdx !== null && swappedIdx !== undefined;
 
@@ -159,6 +160,14 @@
   Proto.onMaterialSlotClicked = function(slotIndex) {
     const g = global.GameState;
     if (!g) return;
+    const { isSpectating, povPlayer } = this._getSpectatorContext ? this._getSpectatorContext() : { isSpectating: false, povPlayer: null };
+    if (isSpectating || this.spectatorSeekPeek) {
+      const tray = povPlayer?.materialsTray || [];
+      const mat = tray[slotIndex] || null;
+      global.AudioSynth?.playCancel?.();
+      g.showToast?.(mat ? `👀 Material #${slotIndex + 1}: ${mat.name} (View Only while spectating)` : `👀 Slot #${slotIndex + 1} is empty.`);
+      return;
+    }
     if (g.inForesightMode) {
       const willFinalize = (g.foresightSwappedIndex !== null && g.foresightSwappedIndex !== undefined && slotIndex === 0);
       if (!willFinalize) global.AudioSynth?.playClick?.();

@@ -142,13 +142,21 @@
       g.inSpellOverflow ||
       (g.activeMaterialMod === 'weave' && (g.weaveStep || 0) > 0) || global.SpellWeave?.inWeaveMode
     );
-    const readySpells = (g.spellbook || []).filter(s => {
+    const povIdx = (net?.isConnected?.() && net.getDefaultPausedPlayerIndex)
+      ? net.getDefaultPausedPlayerIndex()
+      : (g.activePlayerIndex || 0);
+    const activeBook = (isSpectating && g.players?.[povIdx]?.spellbook)
+      ? g.players[povIdx].spellbook
+      : (g.spellbook || []);
+    const readySpells = activeBook.filter(s => {
       if (typeof s.charges === 'number' && s.charges <= 0) return false;
       if (s.usableRound > g.round) return false;
       if (isPlaced && PRE_PLACEMENT_FORMULAS.has(s.formula)) return false;
       return true;
     }).length;
-    const canOpenSpellbook = !isSpellActiveOrUnfinalized && !global.SpellManager?.isTurnTransitionBusy?.() && (readySpells > 0 || (g.spellbook || []).length > 0);
+    const canOpenSpellbook = isSpectating
+      ? (activeBook.length > 0 && !isCanvasOpen && !isPreRound1)
+      : (!isSpellActiveOrUnfinalized && !global.SpellManager?.isTurnTransitionBusy?.() && (readySpells > 0 || activeBook.length > 0));
     const text0 = btnSpells?.getTrait('text');
     if (text0) {
       text0.title = ['Spell', 'Book'];
@@ -312,7 +320,7 @@
       }
     } else if (isSpectating) {
       const hasLogNext = !!(global.TurnLogManager?.hasPendingEntries?.() || global.TurnLogPlayer?.active);
-      [0, 2, 3, 4].forEach(i => {
+      [2, 3, 4].forEach(i => {
         const btn = rightButtonNodes[i];
         if (btn) {
           btn.setGhost(true); btn.setHighlight(false);

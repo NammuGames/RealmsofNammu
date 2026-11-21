@@ -16,6 +16,7 @@
 
   Proto.pushColumn = function(title, renderFn, metadata, originNode = null, options = {}) {
     if (!this.active || this.isAnimating()) return;
+    this.clearPendingDeletions?.();
     if (this.history.length > 0 && this.listTrait) {
       this.history[this.history.length - 1].scroll = this.listTrait.scrollOffset;
       this.history[this.history.length - 1].targetScroll = this.listTrait.targetScrollOffset;
@@ -62,8 +63,7 @@
 
   Proto.popColumn = function(options = {}) {
     if (!this.active || this.isAnimating()) return;
-    this.isPresetDeleteMode = false;
-    this._presetDeleteCategory = null;
+    this.clearPendingDeletions?.();
     const shouldSkip = !!(options?.skipAnimation || this._skipColumnAnimation);
     this._skipColumnAnimation = false;
     if (this.history.length > 1) {

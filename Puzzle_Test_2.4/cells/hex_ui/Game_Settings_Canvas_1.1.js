@@ -154,8 +154,10 @@
     self.sortPresetList(list);
     let activeIdx = Math.max(0, Math.min(list.length - 1, this.config.activePresetIndex || 0));
     const isDeleteMode = !!self.isPresetDeleteMode && (self._presetDeleteCategory === 'Preset');
+    const pendingDel = self._pendingDeleteIds || (self._pendingDeleteIds = new Set());
+    const visibleEntries = list.map((item, idx) => ({ item, idx })).filter(e => !pendingDel.has(e.item.id));
 
-    const items = list.map((item, idx) => {
+    const items = visibleEntries.map(({ item, idx }) => {
       const isChosen = (idx === activeIdx);
       const numStr = item.tagNumber || String(idx + 1).padStart(3, '0');
       const tag = `Preset ${numStr}`;
@@ -181,27 +183,26 @@
               global.GameState?.showToast?.('⚠️ Default presets cannot be deleted!');
               return;
             }
-            if (list.length <= 1) {
+            if (visibleEntries.length <= 1) {
               global.GameState?.showToast?.('⚠️ Cannot delete the only remaining Preset!');
               return;
             }
-            if (global.TurnConfirmPopup?.open) {
-              global.TurnConfirmPopup.open(() => {
-                list.splice(idx, 1);
-                let newIdx = activeIdx;
-                if (idx < activeIdx) newIdx = activeIdx - 1;
-                else if (idx === activeIdx && newIdx >= list.length) newIdx = list.length - 1;
-                if (newIdx < 0) newIdx = 0;
-                self.config.activePresetIndex = newIdx;
-                self.isPresetDeleteMode = false;
-                self._presetDeleteCategory = null;
-                global.GameState?.showToast?.(`✦ Deleted Preset: "${item.name}"`);
-                self.buildScene();
-              }, {
-                title: 'Delete Preset — Are You Sure?',
-                frameColor: '#ff3333'
-              });
-            }
+            pendingDel.add(item.id);
+            self._pendingDeleteCommit = (ids) => {
+              const activeItem = list[self.config.activePresetIndex || 0];
+              let count = 0;
+              for (let k = list.length - 1; k >= 0; k--) {
+                if (ids.has(list[k]?.id) && !list[k]?.isDefault && list.length > 1) {
+                  list.splice(k, 1);
+                  count++;
+                }
+              }
+              const nextIdx = activeItem ? list.indexOf(activeItem) : -1;
+              self.config.activePresetIndex = nextIdx >= 0 ? nextIdx : Math.max(0, Math.min(list.length - 1, self.config.activePresetIndex || 0));
+              if (count > 0) global.GameState?.showToast?.(`✦ Deleted ${count} Preset${count > 1 ? 's' : ''}`);
+            };
+            global.GameState?.showToast?.(`⏳ Staged "${item.name}" for deletion — press Confirm to finalize or Return to cancel`);
+            self.buildScene();
           } else {
             self.isPresetDeleteMode = false;
             self._presetDeleteCategory = null;

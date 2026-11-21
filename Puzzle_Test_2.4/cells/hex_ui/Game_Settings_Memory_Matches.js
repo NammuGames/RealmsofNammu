@@ -93,6 +93,8 @@
     const self = this;
     const mc = global.MemoryCardManager;
     const saves = mc?.listSaves ? mc.listSaves() : [];
+    const pendingDel = self._pendingDeleteIds || (self._pendingDeleteIds = new Set());
+    const visibleSaves = saves.filter(s => !pendingDel.has(s.id));
     const isDelete = !!this._isMatchDeleteMode;
     const armedId = this.selectedSavedMatchId || null;
 
@@ -117,8 +119,8 @@
       }
     });
 
-    // Auto-saved in-progress / paused matches
-    saves.forEach((save, idx) => {
+    // Auto-saved in-progress / paused matches (excluding temporarily hidden staged deletions)
+    visibleSaves.forEach((save, idx) => {
       const isSelected = armedId === save.id;
       const roleLabel = save.roleBadge === 'Host' ? 'Host' : 'Player';
       const titleText = save.matchName || `Match ${save.roomCode || idx + 1}`;
@@ -141,9 +143,18 @@
         isDoubleBorder: isDouble,
         onClick: () => {
           if (isDelete) {
-            mc?.deleteSavedMatch?.(save.id);
-            global.GameState?.showToast?.(`🗑 Removed Saved Match "${titleText}"`);
-            self._isMatchDeleteMode = false;
+            pendingDel.add(save.id);
+            self._pendingDeleteCommit = (ids) => {
+              let count = 0;
+              ids.forEach(id => {
+                mc?.deleteSavedMatch?.(id);
+                if (self.selectedSavedMatchId === id) self.selectedSavedMatchId = null;
+                count++;
+              });
+              if (count > 0) global.GameState?.showToast?.(`🗑 Removed ${count} Saved Match${count > 1 ? 'es' : ''}`);
+            };
+            global.GameState?.showToast?.(`⏳ Staged "${titleText}" for removal — press Confirm to finalize or Return to cancel`);
+            if (visibleSaves.length <= 1) self._isMatchDeleteMode = false;
             self.rebuildTopFrame();
             return;
           }
@@ -156,7 +167,7 @@
     });
 
     // Bottom Delete-mode equivalent: "Quit Match" (no Add New button)
-    if (saves.length > 0 || isDelete) {
+    if (visibleSaves.length > 0 || isDelete) {
       items.push({
         type: 'base',
         id: 'match-quit-delete-toggle',

@@ -88,10 +88,12 @@
     queue.push(['XDM', SETS.XDM.idx], ['DGS', SETS.DGS.idx], ['GSF', SETS.GSF.idx], ['GDA', SETS.GDA.idx]);
     for (let i = 0; i < 12; i++) queue.push(['PWM', i], ['DGD', i], ['SPM', i]);
     for (let i = 0; i < 12; i++) queue.push(['BGM', i]);
+    const isMobileBake = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches || Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560);
     const step = () => {
       if (!queue.length) return;
       const [id, idx] = queue.shift();
-      this._bakeSet(id, idx).finally(() => setTimeout(step, id === 'BGM' ? 120 : 8));
+      const delay = isMobileBake ? (id === 'BGM' ? 260 : 45) : (id === 'BGM' ? 120 : 8);
+      this._bakeSet(id, idx).finally(() => setTimeout(step, delay));
     };
     setTimeout(step, 0);
   };

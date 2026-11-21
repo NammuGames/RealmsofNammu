@@ -81,9 +81,12 @@
         uniform float uCaustic;
         uniform float uVorticity;
         uniform int uFlowMode;
-        uniform float uFlowAngle;
+        uniform vec2 uFlowVec;
         uniform float uAerosolVapor;
-        uniform int uPalette;
+        uniform vec3 uCDeep;
+        uniform vec3 uCMid;
+        uniform vec3 uCHigh;
+        uniform vec3 uCPeak;
         uniform sampler2D uNoiseTex;
 
         // Deep Stars (Behind Mist)
@@ -100,10 +103,9 @@
           p += uPan * 0.002;
           vec2 coord = p * 2.3;
           
-          vec2 flowVec = vec2(cos(uFlowAngle), -sin(uFlowAngle));
           vec2 flowOffset = vec2(0.0);
           if (uFlowMode == 0) {
-            flowOffset = flowVec * (uTime * 0.55);
+            flowOffset = uFlowVec * (uTime * 0.55);
           } else if (uFlowMode == 1) {
             flowOffset = vec2(sin(uTime * 0.65) * 0.55, cos(uTime * 0.52) * 0.55);
           } else if (uFlowMode == 2) {
@@ -139,33 +141,10 @@
           float baseWave = mix(smoothWave, causticWave, uCaustic);
           float totalIntensity = baseWave * uDensity;
           
-          // Palette Colors
-          vec3 col = vec3(0.0);
-          vec3 cDeep = vec3(0.01, 0.04, 0.10);
-          vec3 cMid  = vec3(0.02, 0.71, 0.83);
-          vec3 cHigh = vec3(0.13, 0.83, 0.93);
-          vec3 cPeak = vec3(0.65, 0.95, 0.82);
-          
-          if (uPalette == 1) { // Astral
-            cDeep = vec3(0.03, 0.02, 0.08);
-            cMid  = vec3(0.66, 0.33, 0.97);
-            cHigh = vec3(0.96, 0.25, 0.37);
-            cPeak = vec3(0.22, 0.74, 0.97);
-          } else if (uPalette == 2) { // Solar
-            cDeep = vec3(0.04, 0.03, 0.01);
-            cMid  = vec3(0.96, 0.62, 0.04);
-            cHigh = vec3(0.99, 0.88, 0.28);
-            cPeak = vec3(0.40, 0.91, 0.98);
-          } else if (uPalette == 3) { // Emerald
-            cDeep = vec3(0.01, 0.08, 0.05);
-            cMid  = vec3(0.06, 0.73, 0.51);
-            cHigh = vec3(0.43, 0.91, 0.72);
-            cPeak = vec3(0.49, 0.83, 0.99);
-          }
-          
-          col = mix(cDeep, cMid, clamp(totalIntensity * 1.2, 0.0, 1.0));
-          col = mix(col, cHigh, clamp((totalIntensity - 0.45) * 1.8, 0.0, 1.0));
-          col = mix(col, cPeak, clamp((totalIntensity - 0.85) * 2.5, 0.0, 1.0));
+          // Pre-resolved Palette Colors (hoisted to uniforms for zero per-pixel branching)
+          vec3 col = mix(uCDeep, uCMid, clamp(totalIntensity * 1.2, 0.0, 1.0));
+          col = mix(col, uCHigh, clamp((totalIntensity - 0.45) * 1.8, 0.0, 1.0));
+          col = mix(col, uCPeak, clamp((totalIntensity - 0.85) * 2.5, 0.0, 1.0));
           
           // LAYER 1: Deep Stars (Behind Mist — Naturally Occluded & Diffused by Aerosol Vapor)
           if (uDeepActive == 1) {
@@ -183,7 +162,7 @@
             float twSpeed = (hash.x * 1.8 + 0.6) * uDeepFreq;
             float twPhase = hash.y * 6.28318;
             float twinkle = sin(uTime * twSpeed + twPhase) * 0.5 + 0.5;
-            twinkle = pow(twinkle, 2.0);
+            twinkle = twinkle * twinkle;
             
             // Soft luminous stellar core + celestial glow halo
             float coreRad = 0.075 * uDeepSize * (0.65 + 0.35 * hash.x);
@@ -198,7 +177,7 @@
               deepGlint = (flareX + flareY) * twinkle * 0.8 * uDeepSize;
             }
             
-            vec3 deepStarColor = mix(cHigh, cPeak, hash.y * 0.8 + 0.2);
+            vec3 deepStarColor = mix(uCHigh, uCPeak, hash.y * 0.8 + 0.2);
             col += deepStarColor * (starCore + glowHalo + deepGlint) * 1.1;
           }
 
@@ -209,7 +188,7 @@
             vec4 s2 = texture2D(uNoiseTex, vaporUV * 1.85 - vec2(uTime * 0.035, uTime * 0.022));
             float vaporMask = smoothstep(0.30, 0.75, s1.r * 0.60 + s2.g * 0.40);
             float mistGlow = vaporMask * (baseWave * 1.8 + 0.22) * uAerosolVapor;
-            col += mix(cMid, cPeak, vaporMask) * mistGlow * 0.85;
+            col += mix(uCMid, uCPeak, vaporMask) * mistGlow * 0.85;
           }
 
           gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
@@ -226,14 +205,27 @@
       // Cache Uniform Locations
       const uNames = [
         'uRes', 'uTime', 'uDensity', 'uPan', 'uCaustic', 'uVorticity',
-        'uFlowMode', 'uFlowAngle', 'uAerosolVapor', 'uPalette', 'uNoiseTex',
-        'uDeepActive', 'uDeepDensity', 'uDeepSize', 'uDeepFreq'
+        'uFlowMode', 'uFlowVec', 'uAerosolVapor', 'uCDeep', 'uCMid', 'uCHigh', 'uCPeak',
+        'uNoiseTex', 'uDeepActive', 'uDeepDensity', 'uDeepSize', 'uDeepFreq'
       ];
       for (const name of uNames) {
         this.uniforms[name] = gl.getUniformLocation(this.warpProgram, name);
       }
 
       this.noiseTexture = this._createNoiseTexture(gl);
+      this._lastVpW = 0;
+      this._lastVpH = 0;
+      this._lastPalette = -1;
+      gl.disable(gl.BLEND);
+      gl.useProgram(this.warpProgram);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuf);
+      gl.enableVertexAttribArray(this.aPosLoc);
+      gl.vertexAttribPointer(this.aPosLoc, 2, gl.FLOAT, false, 0, 0);
+      if (this.noiseTexture && this.uniforms.uNoiseTex) {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.noiseTexture);
+        gl.uniform1i(this.uniforms.uNoiseTex, 0);
+      }
       this.initialized = true;
       return true;
     }
@@ -287,19 +279,18 @@
       const gl = this.gl;
       const u = this.uniforms;
 
-      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-      gl.disable(gl.BLEND);
-      gl.useProgram(this.warpProgram);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuf);
-      gl.enableVertexAttribArray(this.aPosLoc);
-      gl.vertexAttribPointer(this.aPosLoc, 2, gl.FLOAT, false, 0, 0);
+      const w = this.canvas.width, h = this.canvas.height;
+      if (this._lastVpW !== w || this._lastVpH !== h) {
+        this._lastVpW = w;
+        this._lastVpH = h;
+        gl.viewport(0, 0, w, h);
+        gl.uniform2f(u.uRes, w, h);
+      }
 
       const flowAngleRad = ((state.flowAngleDeg || 35) * Math.PI) / 180.0;
       const paraX = state.parallaxEnabled ? ((state.panX || 0) * 0.08) : 0;
       const paraY = state.parallaxEnabled ? (-(state.panY || 0) * 0.08) : 0;
 
-      gl.uniform2f(u.uRes, this.canvas.width, this.canvas.height);
       gl.uniform1f(u.uTime, (state.time || 0) * (state.flowSpeed !== undefined ? state.flowSpeed : 0.20));
       gl.uniform1f(u.uDensity, state.mistDensity !== undefined ? state.mistDensity : 0.20);
       gl.uniform2f(u.uPan, paraX, paraY);
@@ -307,21 +298,32 @@
       gl.uniform1f(u.uCaustic, state.caustic !== undefined ? state.caustic : 0.50);
       gl.uniform1f(u.uVorticity, state.vorticity !== undefined ? state.vorticity : 0.50);
       gl.uniform1i(u.uFlowMode, state.flowMode !== undefined ? state.flowMode : 0);
-      gl.uniform1f(u.uFlowAngle, flowAngleRad);
+      gl.uniform2f(u.uFlowVec, Math.cos(flowAngleRad), -Math.sin(flowAngleRad));
       gl.uniform1f(u.uAerosolVapor, state.vaporHaze !== undefined ? state.vaporHaze : 0.40);
-      gl.uniform1i(u.uPalette, state.palette !== undefined ? state.palette : 1);
+
+      const pal = state.palette !== undefined ? state.palette : 1;
+      if (this._lastPalette !== pal) {
+        this._lastPalette = pal;
+        if (pal === 1) {
+          gl.uniform3f(u.uCDeep, 0.03, 0.02, 0.08); gl.uniform3f(u.uCMid, 0.66, 0.33, 0.97);
+          gl.uniform3f(u.uCHigh, 0.96, 0.25, 0.37); gl.uniform3f(u.uCPeak, 0.22, 0.74, 0.97);
+        } else if (pal === 2) {
+          gl.uniform3f(u.uCDeep, 0.04, 0.03, 0.01); gl.uniform3f(u.uCMid, 0.96, 0.62, 0.04);
+          gl.uniform3f(u.uCHigh, 0.99, 0.88, 0.28); gl.uniform3f(u.uCPeak, 0.40, 0.91, 0.98);
+        } else if (pal === 3) {
+          gl.uniform3f(u.uCDeep, 0.01, 0.08, 0.05); gl.uniform3f(u.uCMid, 0.06, 0.73, 0.51);
+          gl.uniform3f(u.uCHigh, 0.43, 0.91, 0.72); gl.uniform3f(u.uCPeak, 0.49, 0.83, 0.99);
+        } else {
+          gl.uniform3f(u.uCDeep, 0.01, 0.04, 0.10); gl.uniform3f(u.uCMid, 0.02, 0.71, 0.83);
+          gl.uniform3f(u.uCHigh, 0.13, 0.83, 0.93); gl.uniform3f(u.uCPeak, 0.65, 0.95, 0.82);
+        }
+      }
 
       // Deep Stars
       gl.uniform1i(u.uDeepActive, state.deepEnabled ? 1 : 0);
       gl.uniform1f(u.uDeepDensity, state.deepDensity || 250);
       gl.uniform1f(u.uDeepSize, state.deepSize || 0.60);
       gl.uniform1f(u.uDeepFreq, state.deepFreq || 3.00);
-
-      if (this.noiseTexture && u.uNoiseTex) {
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.noiseTexture);
-        gl.uniform1i(u.uNoiseTex, 0);
-      }
 
       // GPU Hardware Profiler: Check previous query results (Dual WebGL 1/2)
       if (this.extTimer && this.pendingQuery) {

@@ -67,8 +67,17 @@
       // Offscreen Cached Bezel Bitmap (zero redundant path & clip rebuilds)
       this.cacheBezel = false;
       this._cachedBezel = null;
+      this._cachedBezelKey = '';
       this._bezelHalfW = 0;
       this._bezelHalfH = 0;
+      this._cachedBg = null;
+      this._cachedBgKey = '';
+      this._bgHalfW = 0;
+      this._bgHalfH = 0;
+      this._cachedBorder = null;
+      this._cachedBorderKey = '';
+      this._borderHalfW = 0;
+      this._borderHalfH = 0;
       this._dirtyBezel = true;
     }
 
@@ -94,10 +103,12 @@
     }
 
     setDimensions(wBase, hBase, apex, orientation) {
-      if (wBase !== undefined) this.dimensions.wBase = wBase;
-      if (hBase !== undefined) this.dimensions.hBase = hBase;
-      if (apex !== undefined) this.dimensions.apex = apex;
-      if (orientation !== undefined) this.dimensions.orientation = orientation;
+      let changed = false;
+      if (wBase !== undefined && this.dimensions.wBase !== wBase) { this.dimensions.wBase = wBase; changed = true; }
+      if (hBase !== undefined && this.dimensions.hBase !== hBase) { this.dimensions.hBase = hBase; changed = true; }
+      if (apex !== undefined && this.dimensions.apex !== apex) { this.dimensions.apex = apex; changed = true; }
+      if (orientation !== undefined && this.dimensions.orientation !== orientation) { this.dimensions.orientation = orientation; changed = true; }
+      if (!changed) return;
       this._dirtyGeometry = true;
       this._dirtyBezel = true;
     }
@@ -125,6 +136,9 @@
     invalidateCache() {
       this._dirtyGeometry = true;
       this._dirtyBezel = true;
+      this._cachedBezelKey = '';
+      this._cachedBgKey = '';
+      this._cachedBorderKey = '';
     }
 
     // --- Trait Lifecycle (ECT) ---

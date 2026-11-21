@@ -81,6 +81,15 @@
       const deck = this.deck;
       const deckSync = this.deckSync;
 
+      // Mobile Power Saver: gate both JS simulation & rendering to 30 FPS on touch/mobile viewports
+      const isMobileRender = (typeof window !== 'undefined') && (
+        window.matchMedia?.('(pointer: coarse)')?.matches ||
+        global.ResponsiveViewportAdapter?.viewportClass === 'compact-landscape'
+      );
+      if (isMobileRender && this.lastRenderMs && (now - this.lastRenderMs) < 32.0) {
+        return;
+      }
+
       // Safety clamp on delta time to prevent spiral of death if tab was unfocused
       const dt = Math.min((now - this.lastTime) * 0.001, 0.1);
       this.lastTime = now;
@@ -104,15 +113,6 @@
       }
 
       if (!didTick) return;
-
-      // Mobile Power Saver: cap rendering at 30 FPS on touch/mobile viewports to cut heat & battery drain
-      const isMobileRender = (typeof window !== 'undefined') && (
-        window.matchMedia?.('(pointer: coarse)')?.matches ||
-        global.ResponsiveViewportAdapter?.viewportClass === 'compact-landscape'
-      );
-      if (isMobileRender && this.lastRenderMs && (now - this.lastRenderMs) < 32.0) {
-        return;
-      }
       this.lastRenderMs = now;
 
       // 2. Render Pass
@@ -127,7 +127,7 @@
 
       // Layers 0 & 1: Canvas 2D Hex UI Scene Graph & Interlocking Frames
       if (dom.canvasBoard && engine) {
-        const ctx = dom.canvasBoard.getContext('2d');
+        const ctx = engine.ctx || this._ctx2d || (this._ctx2d = dom.canvasBoard.getContext('2d'));
         ctx.clearRect(0, 0, dom.canvasBoard.width, dom.canvasBoard.height);
         try {
           engine.render(ctx);

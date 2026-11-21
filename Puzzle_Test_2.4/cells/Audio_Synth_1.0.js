@@ -160,7 +160,8 @@
           curve[i] = Math.tanh(x * 1.15) / Math.tanh(1.15);
         }
         softClipper.curve = curve;
-        softClipper.oversample = '2x';
+        const isMobileAudio = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches || Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560);
+        softClipper.oversample = isMobileAudio ? 'none' : '2x';
 
         const limiter = this.ctx.createDynamicsCompressor();
         limiter.threshold.setValueAtTime(-0.5, this.ctx.currentTime);

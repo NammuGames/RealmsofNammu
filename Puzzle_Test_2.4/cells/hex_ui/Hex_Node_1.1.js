@@ -16,28 +16,47 @@
 
   const Proto = HexNode.prototype;
 
+  function getBezelStyleKey(style) {
+    if (!style) return '';
+    const ih = style.innerHighlight;
+    const oh = style.outerHighlight;
+    const iKey = ih?.enabled ? `1:${ih.color || ''}:${ih.spread ?? ih.fade ?? ih.lowestWidth ?? ''}:${ih.stepThickness ?? ''}:${ih.steps ?? ''}:${ih.intensity ?? ih.borderOpacity ?? ''}` : '0';
+    const oKey = oh?.enabled ? `1:${oh.color || ''}:${oh.blur ?? oh.spread ?? oh.reach ?? ''}:${oh.steps ?? ''}:${oh.intensity ?? ''}` : '0';
+    return `${style.bgColor || ''}|${style.bgOpacity ?? ''}|${style.strokeColor || ''}|${iKey}|${oKey}`;
+  }
+
   /**
-   * Offscreen rasterization cache for static button bezels.
+   * Offscreen rasterization cache for static or highlighted bezels (leaf or split container layers).
    */
-  Proto._rasterizeBezelCache = function(bezel, vertices) {
-    if (typeof document === 'undefined') return;
-    const pad = (this.style.outerHighlight?.blur || 18) + 12;
+  Proto._rasterizeLayerCanvas = function(existing, vertices, style, drawFn) {
+    if (typeof document === 'undefined') return null;
+    const oh = style?.outerHighlight;
+    const pad = (oh?.enabled ? (oh.blur ?? oh.spread ?? oh.reach ?? 18) : 4) + 12;
     const hw = (this.dimensions.wBase * 0.5 + this.dimensions.apex) + pad;
     const hh = (this.dimensions.hBase * 0.5 + this.dimensions.apex) + pad;
     const cw = Math.max(1, Math.ceil(hw * 2));
     const ch = Math.max(1, Math.ceil(hh * 2));
 
-    if (!this._cachedBezel) {
-      this._cachedBezel = document.createElement('canvas');
+    const canvas = existing || document.createElement('canvas');
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
     }
-    this._cachedBezel.width = cw;
-    this._cachedBezel.height = ch;
-    const bCtx = this._cachedBezel.getContext('2d');
-    bCtx.translate(cw * 0.5, ch * 0.5);
-    bezel.renderFrameBezel(bCtx, vertices, this.style);
+    const bCtx = canvas.getContext('2d');
+    bCtx.setTransform(1, 0, 0, 1, 0, 0);
+    bCtx.clearRect(0, 0, cw, ch);
+    bCtx.setTransform(1, 0, 0, 1, cw * 0.5, ch * 0.5);
+    drawFn(bCtx, vertices, style);
+    return { canvas, halfW: cw * 0.5, halfH: ch * 0.5 };
+  };
 
-    this._bezelHalfW = cw * 0.5;
-    this._bezelHalfH = ch * 0.5;
+  Proto._rasterizeBezelCache = function(bezel, vertices, style = this.style) {
+    const res = this._rasterizeLayerCanvas(this._cachedBezel, vertices, style, (bCtx, verts, st) => bezel.renderFrameBezel(bCtx, verts, st));
+    if (!res) return;
+    this._cachedBezel = res.canvas;
+    this._bezelHalfW = res.halfW;
+    this._bezelHalfH = res.halfH;
+    this._cachedBezelKey = getBezelStyleKey(style);
     this._dirtyBezel = false;
   };
 
@@ -150,6 +169,8 @@
         };
       }
 
+      const styleKey = (bezel && this.cacheBezel) ? getBezelStyleKey(activeStyle) : '';
+
       if (!hasChildren && !isSidebarBtn && this.atlasKey && atlas && atlas.enabled && !this.highlight) {
         const stamp = atlas.getButtonStamp(this.atlasKey, isHovered);
         if (stamp) {
@@ -158,10 +179,21 @@
       } else if (bezel) {
         if (hasChildren) {
           // Container background renders as base layer underneath traits and children
-          bezel.renderFrameBackground(ctx, vertices, activeStyle);
-        } else if (this.cacheBezel && !isHovered && !this.highlight) {
-          if (!this._cachedBezel || this._dirtyGeometry || this._dirtyBezel) {
-            this._rasterizeBezelCache(bezel, vertices);
+          if (this.cacheBezel) {
+            if (!this._cachedBg || this._dirtyGeometry || this._dirtyBezel || this._cachedBgKey !== styleKey) {
+              const res = this._rasterizeLayerCanvas(this._cachedBg, vertices, activeStyle, (bCtx, verts, st) => bezel.renderFrameBackground(bCtx, verts, st));
+              if (res) {
+                this._cachedBg = res.canvas; this._bgHalfW = res.halfW; this._bgHalfH = res.halfH;
+                this._cachedBgKey = styleKey;
+              }
+            }
+            if (this._cachedBg) ctx.drawImage(this._cachedBg, -this._bgHalfW, -this._bgHalfH);
+          } else {
+            bezel.renderFrameBackground(ctx, vertices, activeStyle);
+          }
+        } else if (this.cacheBezel) {
+          if (!this._cachedBezel || this._dirtyGeometry || this._dirtyBezel || this._cachedBezelKey !== styleKey) {
+            this._rasterizeBezelCache(bezel, vertices, activeStyle);
           }
           if (this._cachedBezel) {
             ctx.drawImage(this._cachedBezel, -this._bezelHalfW, -this._bezelHalfH);
@@ -209,7 +241,19 @@
 
       // 4. Render Frame Borders ON TOP of Children (contents layer under borders, over background)
       if (hasChildren && bezel) {
-        bezel.renderFrameBorders(ctx, vertices, activeStyle);
+        if (this.cacheBezel) {
+          if (!this._cachedBorder || this._dirtyGeometry || this._dirtyBezel || this._cachedBorderKey !== styleKey) {
+            const res = this._rasterizeLayerCanvas(this._cachedBorder, vertices, activeStyle, (bCtx, verts, st) => bezel.renderFrameBorders(bCtx, verts, st));
+            if (res) {
+              this._cachedBorder = res.canvas; this._borderHalfW = res.halfW; this._borderHalfH = res.halfH;
+              this._cachedBorderKey = styleKey;
+              this._dirtyBezel = false;
+            }
+          }
+          if (this._cachedBorder) ctx.drawImage(this._cachedBorder, -this._borderHalfW, -this._borderHalfH);
+        } else {
+          bezel.renderFrameBorders(ctx, vertices, activeStyle);
+        }
       }
 
       // Ghost Mode: Grounded dark translucent veil over button surface

@@ -16,11 +16,15 @@
 
   class PolyhedronLoopCacheClass {
     constructor() {
+      const isMobile = typeof window !== 'undefined' && (
+        window.matchMedia?.('(pointer: coarse)')?.matches ||
+        Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560
+      );
       this.duration = 6.0;      // 6.0 seconds per seamless harmonic cycle
-      this.frameCount = 720;    // 720 frames = 120 fps native capture rate (supports 0.1x ultra-slow tumble)
-      this.cols = 30;           // 30 cols x 24 rows = 720 frames 2D atlas grid
-      this.frameSize = 96;      // Unified single resolution: 96px frame size
-      this.baseRadius = 46.0;   // High-fidelity base radius filling the 96px frame (35px crystal radius)
+      this.frameCount = isMobile ? 360 : 720;    // Mobile: 360 frames (20x18) at 64px cuts VRAM/bandwidth by ~78%
+      this.cols = isMobile ? 20 : 30;
+      this.frameSize = isMobile ? 64 : 96;
+      this.baseRadius = isMobile ? (46.0 * (64 / 96)) : 46.0;
       this.enabled = true;
       this.dirty = true;
       this.polyRender = null;

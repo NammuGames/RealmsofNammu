@@ -23,11 +23,49 @@
 
   /**
    * Shared HexBezelRenderer wrapper for dynamic board tile borders & overlays.
+   * Uses a zoom-scoped offscreen stamp cache for unrotated tiles to eliminate per-tile ctx.clip() overhead.
    */
   proto._drawBoardBezelHex = function(ctx, math, cState, bz, hx, hy, hr, fillCol, glowCol, bgOp, borderOp, outerCol = null, rotationRad = 0) {
     if (!bz) return math.drawHexagon(ctx, hx, hy, hr, fillCol, glowCol, 2.0);
     const tStepDec = cState.tileStepDecrement ?? 0.25, tSteps = cState.tileInnerSteps ?? 3, tStepThick = cState.tileStepThickness ?? 2.0;
     const cZoom = this.zoom || 1.0;
+
+    if (!rotationRad && hr > 4 && typeof document !== 'undefined' && Math.abs((this.zoom || 1) - (this.targetZoom || 1)) < 0.005) {
+      const rKey = Math.round(hr * 2);
+      if (this._tileBezelZoomKey !== rKey) {
+        this._tileBezelZoomKey = rKey;
+        this._tileBezelCache = new Map();
+      }
+      const cache = this._tileBezelCache || (this._tileBezelCache = new Map());
+      const bgQ = Math.round(Math.max(0, Math.min(1, bgOp)) * 50);
+      const bdQ = Math.round(Math.max(0, Math.min(1, borderOp)) * 50);
+      const key = `${fillCol}|${glowCol}|${bgQ}|${bdQ}|${outerCol || ''}|${tSteps}|${tStepThick}|${tStepDec}`;
+      let stamp = cache.get(key);
+      if (!stamp) {
+        if (cache.size >= 64) cache.clear();
+        const pad = outerCol ? Math.ceil(7 * cZoom * 2 + 8) : 6;
+        const half = Math.ceil(hr + pad);
+        const size = half * 2;
+        const sc = document.createElement('canvas');
+        sc.width = size; sc.height = size;
+        const sCtx = sc.getContext('2d');
+        const verts = UNIT_HEX_CORNERS.map(c => ({ x: half + hr * c.cos, y: half + hr * c.sin }));
+        const style = {
+          bgColor: fillCol, bgOpacity: bgQ / 50, strokeColor: glowCol, strokeOpacity: bdQ / 50,
+          innerHighlight: {
+            enabled: true, color: glowCol, steps: tSteps, stepThickness: tStepThick,
+            borderOpacity: bdQ / 50, stepDecrement: tStepDec, zoom: cZoom, drawBoundaryLine: false
+          }
+        };
+        if (outerCol) style.outerHighlight = { enabled: true, color: outerCol, steps: 3, reach: 7 * cZoom, intensity: 0.95 };
+        bz.renderFrameBezel(sCtx, verts, style);
+        stamp = { canvas: sc, half };
+        cache.set(key, stamp);
+      }
+      ctx.drawImage(stamp.canvas, hx - stamp.half, hy - stamp.half);
+      return;
+    }
+
     const cosR = rotationRad ? Math.cos(rotationRad) : 1, sinR = rotationRad ? Math.sin(rotationRad) : 0;
     const verts = UNIT_HEX_CORNERS.map(c => ({
       x: hx + hr * (c.cos * cosR - c.sin * sinR),

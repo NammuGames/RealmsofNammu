@@ -183,7 +183,6 @@
     if (this.stats[normalizedKey] === undefined) return;
     this._applyStatValue(normalizedKey, val.toString(), opts);
     this.updatePlayerTurnHighlight();
-    this.updateStatsLayout();
   };
 
   proto.setStats = function(updates = {}, opts = {}) {
@@ -191,7 +190,6 @@
     if (updates.combo !== undefined && updates.points === undefined) updates.points = updates.combo;
     Object.keys(updates).forEach(k => { if (updates[k] !== undefined) this._applyStatValue(k, updates[k].toString(), opts); });
     this.updatePlayerTurnHighlight();
-    this.updateStatsLayout();
   };
 
   proto.resize = function(viewWidth, viewHeight) {

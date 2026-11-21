@@ -152,12 +152,13 @@
               ctx.fillStyle = `rgba(254, 240, 138, ${alpha * 0.40})`;
               ctx.fill();
               ctx.beginPath();
+              ctx.arc(px, py, ballR * 2.1, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(253, 224, 71, ${alpha * 0.35})`;
+              ctx.fill();
+              ctx.beginPath();
               ctx.arc(px, py, ballR, 0, Math.PI * 2);
               ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-              ctx.shadowColor = '#fde047';
-              ctx.shadowBlur = ballR * 2.5;
               ctx.fill();
-              ctx.shadowBlur = 0;
             }
           });
         });

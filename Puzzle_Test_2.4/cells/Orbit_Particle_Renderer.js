@@ -186,12 +186,16 @@
       ctx.globalAlpha = prevAlpha;
 
       ctx.beginPath();
+      ctx.arc(px, py, ballR * 2.1, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = prevAlpha * 0.28;
+      ctx.fill();
+      ctx.globalAlpha = prevAlpha;
+
+      ctx.beginPath();
       ctx.arc(px, py, ballR, 0, Math.PI * 2);
       ctx.fillStyle = color;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = shadowBlur;
       ctx.fill();
-      ctx.shadowBlur = 0;
 
       ctx.beginPath();
       ctx.arc(px, py, ballR * 0.5, 0, Math.PI * 2);

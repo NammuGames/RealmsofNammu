@@ -28,32 +28,106 @@
       this.config = Object.assign({}, DEFAULT_POPUP_CONFIG);
     }
 
-    _focusMobileInput() {
-      if (typeof document === 'undefined' || (this.mode !== 'roomCode' && this.mode !== 'singleText')) return;
-      let inp = this._mobileInput || document.getElementById('nammu-room-code-input');
-      if (!inp) {
-        inp = document.createElement('input');
+    _isMobileInputDevice() {
+      return typeof window !== 'undefined' && (
+        window.matchMedia?.('(pointer: coarse)')?.matches ||
+        Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560
+      );
+    }
+
+    _ensureMobileBar() {
+      if (typeof document === 'undefined') return null;
+      let bar = document.getElementById('nammu-mobile-input-bar');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'nammu-mobile-input-bar';
+        Object.assign(bar.style, {
+          position: 'fixed', top: '8px', left: '50%', transform: 'translateX(-50%)',
+          zIndex: '10000', display: 'none', alignItems: 'center', gap: '8px',
+          padding: '6px 10px', borderRadius: '10px', maxWidth: 'calc(100vw - 24px)',
+          background: 'rgba(5, 12, 24, 0.94)', border: '1.5px solid #10f000',
+          boxShadow: '0 4px 18px rgba(0, 0, 0, 0.75), 0 0 12px rgba(16, 240, 0, 0.25)',
+          fontFamily: "'Orbitron', 'Inter', sans-serif"
+        });
+        const lbl = document.createElement('span');
+        lbl.className = 'nmib-label';
+        Object.assign(lbl.style, { fontSize: '11px', fontWeight: '700', color: '#38bdf8', whiteSpace: 'nowrap', letterSpacing: '0.5px' });
+
+        const inp = document.createElement('input');
         inp.id = 'nammu-room-code-input';
         inp.type = 'text';
         inp.autocomplete = 'off';
         inp.spellcheck = false;
         inp.setAttribute('enterkeyhint', 'done');
         Object.assign(inp.style, {
-          position: 'fixed', left: '50%', top: '50%', width: '2px', height: '2px',
-          opacity: '0.001', border: '0', padding: '0', margin: '0',
-          background: 'transparent', color: 'transparent', fontSize: '16px', pointerEvents: 'none', zIndex: '-1'
+          width: '180px', maxWidth: '48vw', height: '32px', padding: '0 10px',
+          borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.65)',
+          background: '#091526', color: '#f8fafc', fontSize: '16px', fontWeight: '600',
+          outline: 'none', fontFamily: "'Inter', sans-serif"
         });
-        document.body.appendChild(inp);
+
+        const btnDone = document.createElement('button');
+        btnDone.type = 'button';
+        btnDone.textContent = 'Done';
+        Object.assign(btnDone.style, {
+          height: '32px', padding: '0 12px', borderRadius: '6px', border: '1px solid #10f000',
+          background: 'rgba(16, 240, 0, 0.18)', color: '#4ade80', fontSize: '12px',
+          fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap'
+        });
+        btnDone.addEventListener('pointerdown', (e) => { e.preventDefault(); });
+        btnDone.addEventListener('click', () => this.confirm());
+
+        const btnCancel = document.createElement('button');
+        btnCancel.type = 'button';
+        btnCancel.textContent = '✕';
+        Object.assign(btnCancel.style, {
+          height: '32px', width: '32px', borderRadius: '6px', border: '1px solid rgba(248, 113, 113, 0.6)',
+          background: 'rgba(248, 113, 113, 0.14)', color: '#f87171', fontSize: '13px',
+          fontWeight: '700', cursor: 'pointer', flexShrink: '0'
+        });
+        btnCancel.addEventListener('pointerdown', (e) => { e.preventDefault(); });
+        btnCancel.addEventListener('click', () => this.cancel());
+
+        bar.append(lbl, inp, btnDone, btnCancel);
+        document.body.appendChild(bar);
+        this._mobileBar = bar;
+        this._mobileLabel = lbl;
+        this._mobileInput = inp;
       }
-      this._mobileInput = inp;
+      return bar;
+    }
+
+    _focusMobileInput() {
+      const isMobile = this._isMobileInputDevice();
+      const supportsMode = (this.mode === 'roomCode' || this.mode === 'singleText' || (isMobile && this.mode === 'rename'));
+      if (typeof document === 'undefined' || !supportsMode) return;
+      const bar = this._ensureMobileBar();
+      const inp = this._mobileInput || document.getElementById('nammu-room-code-input');
+      if (!inp || !bar) return;
+
       const isRoom = (this.mode === 'roomCode');
       const maxLen = isRoom ? 4 : (this._singleMaxLen || 18);
       inp.maxLength = maxLen;
       inp.autocapitalize = isRoom ? 'characters' : 'words';
+      inp.placeholder = isRoom ? 'CODE' : (this._singlePlaceholder || this.categoryLabel || 'Name');
+      if (this._mobileLabel) {
+        this._mobileLabel.textContent = isRoom ? 'ROOM' : (this._singleTitle || this.categoryLabel || 'NAME');
+      }
+
+      if (isMobile) {
+        bar.style.display = 'flex';
+      } else {
+        bar.style.display = 'block';
+        Object.assign(bar.style, {
+          left: '-9999px', top: '0', width: '2px', height: '2px', opacity: '0.001',
+          padding: '0', border: 'none', background: 'transparent', boxShadow: 'none', pointerEvents: 'none'
+        });
+      }
+
       const cleanVal = (v) => isRoom ? v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) : v.slice(0, maxLen);
       inp.value = cleanVal(this.targetItem?.name || '');
       inp.oninput = () => {
-        if (!this.active || (this.mode !== 'roomCode' && this.mode !== 'singleText') || !this.targetItem) return;
+        if (!this.active || !this.targetItem) return;
         const clean = cleanVal(inp.value);
         inp.value = clean;
         if (this.targetItem.name !== clean) {
@@ -63,7 +137,7 @@
         }
       };
       inp.onkeydown = (e) => {
-        if (!this.active || (this.mode !== 'roomCode' && this.mode !== 'singleText')) return;
+        if (!this.active) return;
         if (e.key === 'Enter') { e.preventDefault(); this.confirm(); }
         else if (e.key === 'Escape') { e.preventDefault(); this.cancel(); }
       };
@@ -73,6 +147,13 @@
     _blurMobileInput() {
       if (this._mobileInput) {
         try { this._mobileInput.blur(); } catch {}
+      }
+      if (this._mobileBar) {
+        this._mobileBar.style.display = 'none';
+      }
+      if (typeof window !== 'undefined' && global.ResponsiveViewportAdapter?.syncViewport) {
+        setTimeout(() => global.ResponsiveViewportAdapter.syncViewport(), 120);
+        setTimeout(() => global.ResponsiveViewportAdapter.syncViewport(), 420);
       }
     }
 
@@ -211,7 +292,7 @@
       }, 450);
 
       this.bindKeyboard();
-      if (this.mode === 'roomCode' || this.mode === 'singleText') this._focusMobileInput();
+      this._focusMobileInput();
       if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
       global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
       this.triggerRender();

@@ -184,9 +184,11 @@
         queueMicrotask(() => this.syncViewport());
         setTimeout(() => this.syncViewport(), 90);
         setTimeout(() => this.syncViewport(), 280);
+        setTimeout(() => this.syncViewport(), 520);
       };
       window.addEventListener('resize', scheduleSync);
       window.addEventListener('orientationchange', scheduleSync);
+      window.addEventListener('focusout', scheduleSync);
       document.addEventListener('fullscreenchange', () => {
         if (this._isFullscreenActive()) this._wantsLandscapeFullscreen = false;
         scheduleSync();

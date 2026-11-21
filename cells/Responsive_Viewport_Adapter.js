@@ -48,6 +48,9 @@
       this._wrappedEngine = false;
       this._wantsLandscapeFullscreen = false;
       this._lastIsPortrait = undefined;
+      this._inputLocked = false;
+      this._lockedCssW = 0;
+      this._lockedCssH = 0;
     }
 
     init(ctx = {}) {
@@ -178,16 +181,69 @@
       } catch (_) {}
     }
 
+    _getViewportEls() {
+      return [
+        this.dom?.viewport || document.getElementById('viewport-container'),
+        this.dom?.canvasWarp || document.getElementById('canvas-domain-warp'),
+        this.dom?.canvasBoard || document.getElementById('canvas-board-overlay')
+      ].filter(Boolean);
+    }
+
+    lockViewportForInput() {
+      if (typeof document === 'undefined' || this._inputLocked || this.isPortrait) return;
+      const w = Math.max(240, Math.round(this.cssWidth || global.innerWidth || 800));
+      const h = Math.max(180, Math.round(this.cssHeight || global.innerHeight || 400));
+      this._inputLocked = true;
+      this._lockedCssW = w;
+      this._lockedCssH = h;
+      for (const el of this._getViewportEls()) {
+        el.style.setProperty('width', `${w}px`, 'important');
+        el.style.setProperty('height', `${h}px`, 'important');
+        el.style.setProperty('right', 'auto', 'important');
+        el.style.setProperty('bottom', 'auto', 'important');
+      }
+    }
+
+    unlockViewportForInput() {
+      if (!this._inputLocked) return;
+      this._inputLocked = false;
+      for (const el of this._getViewportEls()) {
+        el.style.removeProperty('width');
+        el.style.removeProperty('height');
+        el.style.removeProperty('right');
+        el.style.removeProperty('bottom');
+      }
+      if (!this.isPortrait) this._wantsLandscapeFullscreen = true;
+      queueMicrotask(() => this.syncViewport());
+      setTimeout(() => this.syncViewport(), 120);
+      setTimeout(() => this.syncViewport(), 340);
+      setTimeout(() => this.syncViewport(), 580);
+    }
+
     _bindEvents() {
       if (typeof window === 'undefined') return;
       const scheduleSync = () => {
+        if (this._inputLocked) return;
         queueMicrotask(() => this.syncViewport());
         setTimeout(() => this.syncViewport(), 90);
         setTimeout(() => this.syncViewport(), 280);
         setTimeout(() => this.syncViewport(), 520);
       };
       window.addEventListener('resize', scheduleSync);
-      window.addEventListener('orientationchange', scheduleSync);
+      window.addEventListener('orientationchange', () => {
+        if (this._inputLocked) {
+          const oType = global.screen?.orientation?.type || '';
+          const turnedPortrait = oType.startsWith('portrait') || (global.innerHeight > global.innerWidth);
+          if (turnedPortrait) {
+            if (document.activeElement && typeof document.activeElement.blur === 'function') {
+              try { document.activeElement.blur(); } catch (_) {}
+            }
+            this.unlockViewportForInput();
+            return;
+          }
+        }
+        scheduleSync();
+      });
       window.addEventListener('focusout', scheduleSync);
       document.addEventListener('fullscreenchange', () => {
         if (this._isFullscreenActive()) this._wantsLandscapeFullscreen = false;
@@ -234,6 +290,7 @@
 
     /** Computes desktop vs virtual-anchored scale and keeps backing canvas Retina-crisp. */
     syncViewport() {
+      if (this._inputLocked) return;
       const canvasWarp = this.dom?.canvasWarp || document.getElementById('canvas-domain-warp');
       const canvasBoard = this.dom?.canvasBoard || document.getElementById('canvas-board-overlay');
       const container = this.dom?.viewport || document.getElementById('viewport-container');

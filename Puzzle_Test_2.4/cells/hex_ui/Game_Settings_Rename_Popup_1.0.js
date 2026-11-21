@@ -42,16 +42,20 @@
         bar = document.createElement('div');
         bar.id = 'nammu-mobile-input-bar';
         Object.assign(bar.style, {
-          position: 'fixed', top: '8px', left: '50%', transform: 'translateX(-50%)',
-          zIndex: '10000', display: 'none', alignItems: 'center', gap: '8px',
-          padding: '6px 10px', borderRadius: '10px', maxWidth: 'calc(100vw - 24px)',
-          background: 'rgba(5, 12, 24, 0.94)', border: '1.5px solid #10f000',
-          boxShadow: '0 4px 18px rgba(0, 0, 0, 0.75), 0 0 12px rgba(16, 240, 0, 0.25)',
+          position: 'fixed', top: '24%', left: '50%', transform: 'translate(-50%, -50%)',
+          zIndex: '10000', display: 'none', alignItems: 'center', gap: '12px',
+          width: 'min(580px, 86vw)', boxSizing: 'border-box',
+          padding: '12px 16px', borderRadius: '14px',
+          background: 'rgba(5, 12, 24, 0.96)', border: '2px solid #10f000',
+          boxShadow: '0 8px 28px rgba(0, 0, 0, 0.82), 0 0 18px rgba(16, 240, 0, 0.30)',
           fontFamily: "'Orbitron', 'Inter', sans-serif"
         });
         const lbl = document.createElement('span');
         lbl.className = 'nmib-label';
-        Object.assign(lbl.style, { fontSize: '11px', fontWeight: '700', color: '#38bdf8', whiteSpace: 'nowrap', letterSpacing: '0.5px' });
+        Object.assign(lbl.style, {
+          fontSize: '14px', fontWeight: '700', color: '#38bdf8',
+          whiteSpace: 'nowrap', letterSpacing: '0.6px', flexShrink: '0'
+        });
 
         const inp = document.createElement('input');
         inp.id = 'nammu-room-code-input';
@@ -60,9 +64,9 @@
         inp.spellcheck = false;
         inp.setAttribute('enterkeyhint', 'done');
         Object.assign(inp.style, {
-          width: '180px', maxWidth: '48vw', height: '32px', padding: '0 10px',
-          borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.65)',
-          background: '#091526', color: '#f8fafc', fontSize: '16px', fontWeight: '600',
+          flex: '1', minWidth: '0', height: '48px', padding: '0 14px',
+          borderRadius: '8px', border: '1.5px solid rgba(56, 189, 248, 0.75)',
+          background: '#091526', color: '#f8fafc', fontSize: '20px', fontWeight: '600',
           outline: 'none', fontFamily: "'Inter', sans-serif"
         });
 
@@ -70,9 +74,10 @@
         btnDone.type = 'button';
         btnDone.textContent = 'Done';
         Object.assign(btnDone.style, {
-          height: '32px', padding: '0 12px', borderRadius: '6px', border: '1px solid #10f000',
-          background: 'rgba(16, 240, 0, 0.18)', color: '#4ade80', fontSize: '12px',
-          fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap'
+          height: '48px', minWidth: '76px', padding: '0 16px', borderRadius: '8px',
+          border: '1.5px solid #10f000', background: 'rgba(16, 240, 0, 0.20)',
+          color: '#4ade80', fontSize: '15px', fontWeight: '700',
+          cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: '0'
         });
         btnDone.addEventListener('pointerdown', (e) => { e.preventDefault(); });
         btnDone.addEventListener('click', () => this.confirm());
@@ -81,9 +86,10 @@
         btnCancel.type = 'button';
         btnCancel.textContent = '✕';
         Object.assign(btnCancel.style, {
-          height: '32px', width: '32px', borderRadius: '6px', border: '1px solid rgba(248, 113, 113, 0.6)',
-          background: 'rgba(248, 113, 113, 0.14)', color: '#f87171', fontSize: '13px',
-          fontWeight: '700', cursor: 'pointer', flexShrink: '0'
+          height: '48px', width: '48px', borderRadius: '8px',
+          border: '1.5px solid rgba(248, 113, 113, 0.65)', background: 'rgba(248, 113, 113, 0.16)',
+          color: '#f87171', fontSize: '18px', fontWeight: '700',
+          cursor: 'pointer', flexShrink: '0'
         });
         btnCancel.addEventListener('pointerdown', (e) => { e.preventDefault(); });
         btnCancel.addEventListener('click', () => this.cancel());
@@ -95,6 +101,26 @@
         this._mobileInput = inp;
       }
       return bar;
+    }
+
+    _positionMobileBar() {
+      const bar = this._mobileBar;
+      if (!bar || !this._isMobileInputDevice()) return;
+      const vv = global.visualViewport;
+      const fullH = global.ResponsiveViewportAdapter?._lockedCssH || global.innerHeight || 400;
+      const fullW = global.ResponsiveViewportAdapter?._lockedCssW || global.innerWidth || 800;
+      const visH = (vv && vv.height > 0) ? vv.height : fullH;
+      const visW = (vv && vv.width > 0) ? vv.width : fullW;
+      const offTop = vv?.offsetTop || 0;
+      const offLeft = vv?.offsetLeft || 0;
+      const kbOpen = visH < fullH * 0.82;
+      const targetY = kbOpen
+        ? Math.max(46, Math.min(fullH * 0.30, offTop + visH * 0.5))
+        : Math.round(fullH * 0.24);
+      const targetX = Math.round(offLeft + visW * 0.5);
+      bar.style.top = `${Math.round(targetY)}px`;
+      bar.style.left = `${targetX}px`;
+      bar.style.width = `${Math.min(580, Math.round(visW * 0.86))}px`;
     }
 
     _focusMobileInput() {
@@ -115,7 +141,19 @@
       }
 
       if (isMobile) {
-        bar.style.display = 'flex';
+        global.ResponsiveViewportAdapter?.lockViewportForInput?.();
+        Object.assign(bar.style, {
+          display: 'flex', transform: 'translate(-50%, -50%)', opacity: '1',
+          padding: '12px 16px', border: '2px solid #10f000',
+          background: 'rgba(5, 12, 24, 0.96)', pointerEvents: 'auto',
+          boxShadow: '0 8px 28px rgba(0, 0, 0, 0.82), 0 0 18px rgba(16, 240, 0, 0.30)'
+        });
+        this._positionMobileBar();
+        if (global.visualViewport && !this._onVvResize) {
+          this._onVvResize = () => this._positionMobileBar();
+          global.visualViewport.addEventListener('resize', this._onVvResize);
+          global.visualViewport.addEventListener('scroll', this._onVvResize);
+        }
       } else {
         bar.style.display = 'block';
         Object.assign(bar.style, {
@@ -142,16 +180,24 @@
         else if (e.key === 'Escape') { e.preventDefault(); this.cancel(); }
       };
       try { inp.focus({ preventScroll: true }); } catch { inp.focus(); }
+      if (isMobile) setTimeout(() => this._positionMobileBar(), 160);
     }
 
     _blurMobileInput() {
+      if (global.visualViewport && this._onVvResize) {
+        global.visualViewport.removeEventListener('resize', this._onVvResize);
+        global.visualViewport.removeEventListener('scroll', this._onVvResize);
+        this._onVvResize = null;
+      }
       if (this._mobileInput) {
         try { this._mobileInput.blur(); } catch {}
       }
       if (this._mobileBar) {
         this._mobileBar.style.display = 'none';
       }
-      if (typeof window !== 'undefined' && global.ResponsiveViewportAdapter?.syncViewport) {
+      if (global.ResponsiveViewportAdapter?.unlockViewportForInput) {
+        global.ResponsiveViewportAdapter.unlockViewportForInput();
+      } else if (typeof window !== 'undefined' && global.ResponsiveViewportAdapter?.syncViewport) {
         setTimeout(() => global.ResponsiveViewportAdapter.syncViewport(), 120);
         setTimeout(() => global.ResponsiveViewportAdapter.syncViewport(), 420);
       }

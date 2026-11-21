@@ -40,7 +40,11 @@
      */
     drawPlacementGhost(ctx, math, data, originX, originY, hexRadius, elapsedTime, options = {}) {
       const state = global.GameState;
-      if (!state || !math || !state.isMaterialSelected || state.placedThisTurn || !state.placementCursor) return;
+      const net = global.NetworkP2PManager;
+      const isSpectating = !!(net?.isConnected?.() && !net.isLocalPlayersTurn());
+      const isLogShow = !!(global.TurnLogPlayer?.active || global.TurnLogManager?.hasPendingEntries?.());
+      const notMidTurn = !!(state?.turnPhase && state.turnPhase !== 'MID_TURN');
+      if (!state || !math || isSpectating || isLogShow || notMidTurn || !state.isMaterialSelected || state.placedThisTurn || !state.placementCursor) return;
 
       const activeMat = state.getActiveMaterial ? state.getActiveMaterial() : null;
       if (!activeMat) return;

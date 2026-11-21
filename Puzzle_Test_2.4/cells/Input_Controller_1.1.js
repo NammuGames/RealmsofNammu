@@ -171,7 +171,12 @@
         if (state.inForesightMode) {
           e.preventDefault();
           state.selectForesightMaterial(slot);
-        } else if (slot === 0 && !state.placedThisTurn) {
+        } else if (
+          slot === 0 &&
+          !state.placedThisTurn &&
+          !global.SpellManager?.isTurnTransitionBusy?.() &&
+          (!global.NetworkP2PManager?.isConnected?.() || global.NetworkP2PManager.isLocalPlayersTurn())
+        ) {
           state.selectedTrayIndex = 0;
           state.isMaterialSelected = true;
           if (audio) audio.playClick();

@@ -137,22 +137,23 @@
       });
 
       const makeStyle = (isEnabled) => ({
-        bgColor: isEnabled ? 'rgba(4, 12, 14, 0.90)' : 'rgba(6, 10, 16, 0.72)',
-        bgOpacity: isEnabled ? 0.90 : 0.72,
-        innerHighlight: { enabled: true, color: isEnabled ? '#10f000' : '#1f3a2e', sharpEdgeColor: isEnabled ? '#10f000' : '#2d5240', spread: isEnabled ? 8 : 5, intensity: isEnabled ? 0.85 : 0.45, steps: 3 },
-        outerHighlight: { enabled: isEnabled, color: '#0abd0d', blur: 18, intensity: 0.42 }
+        bgColor: isEnabled ? 'rgba(4, 12, 14, 1.0)' : 'rgba(6, 10, 16, 1.0)',
+        bgOpacity: 1.0,
+        innerHighlight: { enabled: true, color: isEnabled ? '#10f000' : '#1f3a2e', sharpEdgeColor: isEnabled ? '#10f000' : '#2d5240', spread: 8, intensity: 0.80, steps: 3 },
+        outerHighlight: { enabled: false }
       });
 
       const createBranch = (id, label, isPuzzle) => {
         const node = new HexNode({ id, ...makeRegularPointyHexDims(84), clipContent: false, visible: false, alpha: 0, scale: 0.65, style: makeStyle(isPuzzle) });
         node.isCustomSized = true;
+        if (isPuzzle) node.isSidebarButton = true;
         node.addTrait(new TextTrait({
           title: label, titleSize: isPuzzle ? 24 : 18,
           titleColor: isPuzzle ? '#f8fafc' : 'rgba(203, 213, 225, 0.55)',
           fontFamily: '"Orbitron", "Inter", sans-serif'
         }));
         node.addTrait(new ButtonTrait({
-          disabled: !isPuzzle, hoverGlowColor: '#10f000', hoverOutline: isPuzzle, soundClick: false,
+          disabled: !isPuzzle, hoverGlowColor: '#ff9214', hoverOutline: isPuzzle, soundClick: false,
           onClick: () => { if (isPuzzle) self._onPuzzleClicked(); }
         }));
         return node;
@@ -168,11 +169,12 @@
         clipContent: false, visible: false, alpha: 0, scale: 0.001, style: makeStyle(true)
       });
       rootNode.isCustomSized = true;
+      rootNode.isSidebarButton = true;
       rootNode.addTrait(new TextTrait({
         title: ['Nammu', 'Games'], titleSize: 28, lineSpacing: 32,
         titleColor: '#f8fafc', fontFamily: '"Orbitron", "Inter", sans-serif'
       }));
-      rootNode.addTrait(new ButtonTrait({ hoverGlowColor: '#10f000', soundClick: false, onClick: () => self._onRootClicked() }));
+      rootNode.addTrait(new ButtonTrait({ hoverGlowColor: '#ff9214', soundClick: false, onClick: () => self._onRootClicked() }));
 
       stageNode.addChild(leftEmpty);
       stageNode.addChild(midPuzzle);
@@ -330,6 +332,7 @@
       global.TweenOrchestrator?.cancel?.('hub_root_expand');
       if (this.rootNode) { this.rootNode.scale = 1.0; this.rootNode.alpha = 1.0; }
       this.crownOpen = true;
+      this.ribbonProgress = 1.0;
       this.stage = 'crown_expand';
       global.AudioSynth?.playConfirm?.();
 
@@ -359,7 +362,7 @@
         easing: 'easeOutCubic',
         onUpdate: (val, rawT) => {
           this.crownProgress = val;
-          this.ribbonProgress = Math.min(1.0, rawT * 1.1);
+          this.ribbonProgress = 1.0;
           const bAlpha = Math.min(1.0, rawT * 1.5);
           const bScale = 0.72 + 0.28 * val;
           this.branchNodes.forEach((b) => {
@@ -402,8 +405,8 @@
     }
 
     _renderStageBackdrop(ctx) {
-      // 1. Aurora ribbons (black core, green sides) connecting Root -> 3 Crown branches
-      if (this.ribbonProgress > 0.01 && this.uiAlpha > 0.01 && global.AlignmentMotionFX?.drawAurora && this.rootNode) {
+      // 1. Aurora ribbons (black core, green sides) anchored to Root -> 3 Crown branch centers
+      if (this.crownProgress > 0.01 && this.uiAlpha > 0.01 && global.AlignmentMotionFX?.drawAurora && this.rootNode) {
         const time = this.ctx?.state?.time ?? (performance.now() * 0.001);
         const pRoot = { x: this.rootNode.position.x, y: this.rootNode.position.y };
         ctx.save();
@@ -421,7 +424,7 @@
             AURORA_BRIGHT_GREEN,
             phase,
             this.metrics.ribbonWidth || 92,
-            this.ribbonProgress
+            1.0
           );
         });
         ctx.restore();

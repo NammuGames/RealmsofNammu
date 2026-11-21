@@ -111,9 +111,9 @@
         position: { x: 0, y: 0 },
         wBase: 760, hBase: 460, apex: 140, orientation: 'flat', clipContent: true,
         style: {
-          bgColor: 'rgba(5, 10, 20, 0.96)', bgOpacity: 0.96,
-          innerHighlight: { enabled: true, color: '#10f000', sharpEdgeColor: '#10f000', spread: 8, intensity: 0.85, steps: 3 },
-          outerHighlight: { enabled: true, color: '#0abd0d', blur: 18, intensity: 0.42 }
+          bgColor: 'rgba(5, 10, 20, 1.0)', bgOpacity: 1.0,
+          innerHighlight: { enabled: true, color: '#10f000', sharpEdgeColor: '#10f000', spread: 8, intensity: 0.80, steps: 3 },
+          outerHighlight: { enabled: false }
         }
       });
       popup.isCustomSized = true;
@@ -155,16 +155,17 @@
         position: { x: 0, y: 132 },
         wBase: 220, hBase: 76, apex: 26, orientation: 'flat',
         style: {
-          bgColor: 'rgba(8, 22, 20, 0.95)', bgOpacity: 0.95,
-          innerHighlight: { enabled: true, color: '#10f000', sharpEdgeColor: '#10f000', spread: 7, intensity: 0.85, steps: 3 },
-          outerHighlight: { enabled: true, color: '#0abd0d', blur: 12, intensity: 0.35 }
+          bgColor: 'rgba(8, 22, 20, 1.0)', bgOpacity: 1.0,
+          innerHighlight: { enabled: true, color: '#10f000', sharpEdgeColor: '#10f000', spread: 8, intensity: 0.80, steps: 3 },
+          outerHighlight: { enabled: false }
         }
       });
+      enterBtn.isSidebarButton = true;
       enterBtn.addTrait(new TextTrait({
         title: 'Enter', titleSize: 22, titleColor: '#f8fafc', fontFamily: '"Orbitron", "Inter", sans-serif'
       }));
       enterBtn.addTrait(new ButtonTrait({
-        hoverGlowColor: '#10f000',
+        hoverGlowColor: '#ff9214',
         onClick: () => self._onEnterClicked()
       }));
 

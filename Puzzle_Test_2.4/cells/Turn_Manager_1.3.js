@@ -184,8 +184,6 @@
           global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
         }
 
-        global.NetworkP2PManager?.onTurnAdvancementComplete?.();
-
         const pLabel = (state.playerCount > 1) ? `Player ${state.currentPlayerId || 1} • ` : '';
         state.showToast(`${pLabel}Round ${state.round} Begins`);
         state.syncUI();

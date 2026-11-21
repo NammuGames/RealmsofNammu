@@ -37,7 +37,11 @@
         const hostMaxSeq = lm?.hostLog?.length ? lm.hostLog[lm.hostLog.length - 1].seq : 0;
         if (snap) {
           const netSnap = snap.turnLog ? { ...snap, turnLog: undefined } : snap;
-          this._publishRoom?.({ type: 'STATE_SYNC', reason: 'JOIN', hostMaxSeq, snap: netSnap }, fromPeerId);
+          this._publishRoom?.({
+            type: 'STATE_SYNC', reason: 'JOIN', hostMaxSeq,
+            seatOwners: this.seatOwners?.length ? this.seatOwners : undefined,
+            snap: netSnap
+          }, fromPeerId);
         }
       }
       this._updateDrawerUI();
@@ -122,11 +126,17 @@
       const entries = global.TurnLogManager?.getEntriesAfter?.(msg.afterSeq || 0) || [];
       const targetSnap = global.MemoryCardManager?.capturePuzzleState?.();
       if (targetSnap && targetSnap.turnLog) targetSnap.turnLog = undefined;
-      this._publishRoom?.({ type: 'LOG_SYNC_BATCH', entries, targetSnap }, fromPeerId);
+      this._publishRoom?.({
+        type: 'LOG_SYNC_BATCH', entries, targetSnap,
+        seatOwners: this.seatOwners?.length ? this.seatOwners : undefined
+      }, fromPeerId);
       return;
     }
 
     if (msg.type === 'LOG_SYNC_BATCH' && this.role === 'guest') {
+      if (Array.isArray(msg.seatOwners) && msg.seatOwners.length > 0) {
+        this.seatOwners = msg.seatOwners.slice();
+      }
       const lm = global.TurnLogManager;
       const lp = global.TurnLogPlayer;
       const added = lm?.enqueueIncomingEntries?.(msg.entries || []) || 0;
@@ -136,7 +146,7 @@
         global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
         global.BoardRenderer?.render?.();
       } else if (msg.targetSnap && !lm?.hasPendingEntries?.() && !lp?.active) {
-        this._applyRemoteStateSync(msg.targetSnap);
+        this._applyRemoteStateSync(msg.targetSnap, null, 'TURN', 0, msg.seatOwners || null);
       }
       return;
     }
@@ -154,7 +164,7 @@
       if (msg.syncId && msg.syncId === this._lastRemoteSyncKey) return;
       this._lastRemoteSyncKey = msg.syncId || '';
       if (this._pendingSync) { clearInterval(this._pendingSync.timer); this._pendingSync = null; }
-      this._applyRemoteStateSync(msg.snap, msg.logEntry || null, msg.reason || 'TURN', msg.hostMaxSeq || 0);
+      this._applyRemoteStateSync(msg.snap, msg.logEntry || null, msg.reason || 'TURN', msg.hostMaxSeq || 0, msg.seatOwners || null);
     }
   };
 
@@ -191,7 +201,11 @@
     const hostMaxSeq = lm?.hostLog?.length ? lm.hostLog[lm.hostLog.length - 1].seq : 0;
     const netSnap = snap.turnLog ? { ...snap, turnLog: undefined } : snap;
     const syncId = `${this.myPeerId}:${++this._syncSeq}`;
-    const payload = { type: 'STATE_SYNC', sender: this.myPeerId, reason, hostMaxSeq, syncId, snap: netSnap, logEntry: latestEntry };
+    const payload = {
+      type: 'STATE_SYNC', sender: this.myPeerId, reason, hostMaxSeq, syncId,
+      seatOwners: this.seatOwners?.length ? this.seatOwners : undefined,
+      snap: netSnap, logEntry: latestEntry
+    };
     if (this._pendingSync) { clearInterval(this._pendingSync.timer); this._pendingSync = null; }
     this._publishRoom?.(payload, '*');
     if (this.connections.size > 0) {
@@ -239,7 +253,10 @@
     } finally { this._applyingRemote = false; }
   };
 
-  proto._applyRemoteStateSync = async function(snap, logEntry = null, reason = 'TURN', hostMaxSeq = 0) {
+  proto._applyRemoteStateSync = async function(snap, logEntry = null, reason = 'TURN', hostMaxSeq = 0, seatOwners = null) {
+    if (this.role === 'guest' && Array.isArray(seatOwners) && seatOwners.length > 0) {
+      this.seatOwners = seatOwners.slice();
+    }
     if (global.HubGameLoader?.activeGameId !== 'puzzle') {
       await global.HubGameLoader?.launchGame?.('puzzle');
     }

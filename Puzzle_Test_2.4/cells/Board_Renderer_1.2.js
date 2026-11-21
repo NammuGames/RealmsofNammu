@@ -82,19 +82,19 @@
             covScale = covAnim.scaleCover;
           }
           if (covScale > 0.01 && global.PolyhedronRenderer) {
-            global.PolyhedronRenderer.drawComponent(ctx, x, y, compR * covScale, covered.color, this.elapsedTime, false, false, 0.95, tile.seedPhase, tile.seedTilt);
+            global.PolyhedronRenderer.drawComponent(ctx, x, y, compR * covScale, covered.color, this.elapsedTime, false, false, 0.95 * logAlpha, tile.seedPhase, tile.seedTilt);
           }
           if (rr?.renderCoverPulse) {
             rr.renderCoverPulse(ctx, math, tile.q, tile.r, this.originX, this.originY, this.hexRadius);
           }
-          const covAlpha = (animState && animState.scale !== undefined) ? animState.scale : 1.0;
+          const covAlpha = ((animState && animState.scale !== undefined) ? animState.scale : 1.0) * logAlpha;
           if (covAlpha > 0.001) {
             drawBezelHex(x, y, effR, '#64748b', '#94a3b8', pGreyBg * covAlpha, pGreyBorder * covAlpha);
           }
           renderR = compR * 0.80; // 20% shrink for disease tokens covering a component
         } else if (tile.plagueId && offBoardPlagues.has(tile.plagueId)) {
           const sh = global.ComponentDisease?.shapes?.get(tile.plagueId);
-          const gAlpha = (sh && sh.greyBackTileAlpha !== undefined) ? sh.greyBackTileAlpha : 1.0;
+          const gAlpha = ((sh && sh.greyBackTileAlpha !== undefined) ? sh.greyBackTileAlpha : 1.0) * logAlpha;
           if (gAlpha > 0.001) drawBezelHex(x, y, effR, '#64748b', '#94a3b8', pGreyBg * gAlpha, pGreyBorder * gAlpha);
         }
       } else if (animState && animState.bezelAlpha > 0.001) {
@@ -117,7 +117,9 @@
       if (typeof global.PolyhedronRenderer.drawBatch === 'function') global.PolyhedronRenderer.drawBatch(ctx, placedBatch, this.elapsedTime);
       else placedBatch.forEach(it => global.PolyhedronRenderer.drawComponent(ctx, it.cx, it.cy, it.radius, it.colorName, this.elapsedTime, false, false, 1.0, it.seedPhase, it.seedTilt));
     }
-    global.TurnLogPlayer?.renderOutgoingComponents?.(ctx, math, this.originX, this.originY, this.hexRadius, this.elapsedTime);
+    global.TurnLogPlayer?.renderOutgoingComponents?.(ctx, math, this.originX, this.originY, this.hexRadius, this.elapsedTime, {
+      drawBezelHex, backBgOp, backBorderOp, pGreyBg, pGreyBorder
+    });
 
     // 4. RENDER OUT-OF-BOUNDS DAMAGE SEGMENTS PLACED THIS TURN
     if (state.activeDamageTiles && state.activeDamageTiles.length > 0) {
@@ -165,13 +167,13 @@
       }
       const animState = global.BoardRippleRenderer?.getTileAnimState?.(p.tile.q, p.tile.r);
       const animScale = (animState && animState.scale !== undefined) ? animState.scale : 1.0;
+      const oLogAlpha = global.TurnLogPlayer?.getTileAlpha?.(p.tile.q, p.tile.r) ?? 1.0;
       const uRadius = p.tile.burned ? (p.compR * animScale) : p.compR;
       if (p.tile.underneath?.color && global.PolyhedronRenderer && uRadius > 0.001) {
-        const uAlpha = (animScale < 0.5) ? 1.0 : 0.95;
+        const uAlpha = ((animScale < 0.5) ? 1.0 : 0.95) * oLogAlpha;
         global.PolyhedronRenderer.drawComponent(ctx, p.x, p.y, uRadius, p.tile.underneath.color, this.elapsedTime, false, false, uAlpha, p.tile.seedPhase, p.tile.seedTilt);
       }
       let eAlpha = (animState && animState.enchantmentAlpha !== undefined) ? animState.enchantmentAlpha : 1.0;
-      const oLogAlpha = global.TurnLogPlayer?.getTileAlpha?.(p.tile.q, p.tile.r) ?? 1.0;
       eAlpha *= oLogAlpha;
       if (global.BoardRippleRenderer?.isSigilDetonatingTile?.(p.tile.q, p.tile.r)) {
         eAlpha *= global.BoardRippleRenderer.getResonantSigilBackTileAlpha(`${p.tile.q},${p.tile.r}`);

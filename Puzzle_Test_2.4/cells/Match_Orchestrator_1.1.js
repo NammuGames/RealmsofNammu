@@ -157,6 +157,7 @@
             global.UICardsDeck?.syncMaterialsQueueColumn?.();
             global.UICardsDeck?.syncSpellbookColumn?.();
             global.BoardRenderer?.render?.();
+            global.NetworkP2PManager?.onMatchStartComplete?.();
           };
 
           const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);

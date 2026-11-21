@@ -27,6 +27,7 @@
       else pod = this.createBaseButtonPod(it);
       if (pod) this.listContainer.addChild(pod);
     });
+    this.listTrait.clampScroll?.();
     this.listTrait.layoutChildren();
   };
 

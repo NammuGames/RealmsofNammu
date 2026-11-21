@@ -89,6 +89,7 @@
           if (global.BoardRippleRenderer?.getBurnSigilFadeAlpha) {
             tileAlpha *= global.BoardRippleRenderer.getBurnSigilFadeAlpha(s.id);
           }
+          tileAlpha *= (global.TurnLogPlayer?.getSigilAlpha?.(s.id) ?? 1.0);
           if (tileAlpha > 0.001) {
             const style = { bg: elem?.color || '#ffffff', stroke: elem?.secondary || elem?.sec || '#38bdf8', alpha: tileAlpha };
             s.tiles.forEach(tk => lockedTileStyles.push({ tk, style }));

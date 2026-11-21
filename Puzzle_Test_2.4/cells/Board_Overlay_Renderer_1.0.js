@@ -82,12 +82,11 @@
         (state.lockedSigilIds && state.lockedSigilIds.has(s.id)) ||
         (resolver?.isTransitionActive && resolver?.deactivatingSigilIds?.has(s.id))
       );
-      if (!lockedSigils || lockedSigils.length === 0) return;
 
       const emblemRenderer = global.SigilEmblemRenderer;
       const pulse = (Math.sin((pulseTime || 0) * 4) + 1) * 0.5;
 
-      lockedSigils.forEach(sigil => {
+      (lockedSigils || []).forEach(sigil => {
         if (global.BoardRippleRenderer?.isSigilDetonating?.(sigil.id)) return;
         let emblemScale = 1.0, expAlpha = 1.0;
         const rr = global.BoardRippleRenderer;
@@ -213,7 +212,6 @@
           ctx.restore();
         }
       });
-      global.TurnLogPlayer?.renderOutgoingSigils?.(ctx, math, originX, originY, hexRadius);
     }
   }
 

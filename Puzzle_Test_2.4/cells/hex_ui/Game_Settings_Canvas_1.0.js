@@ -410,6 +410,7 @@
       this.listTrait.scrollOffset = Math.min(0, prevScroll);
       this.listTrait.targetScrollOffset = Math.min(0, prevTarget);
       this.listTrait.layoutChildren = function() {
+        this.clampScroll?.();
         if (!this.node || this.node.children.length === 0) return;
         const canvasH = frame?.dimensions?.hBase || 800;
         let curY = -canvasH * 0.5 + 40 + this.scrollOffset;

@@ -300,8 +300,16 @@
       return Math.max(0, (count - this.capacity) * step);
     }
 
+    clampScroll() {
+      if (!this.node) return;
+      const maxScroll = (typeof this.getMaxScroll === 'function') ? this.getMaxScroll() : 0;
+      this.scrollOffset = Math.max(-maxScroll, Math.min(0, this.scrollOffset || 0));
+      this.targetScrollOffset = Math.max(-maxScroll, Math.min(0, this.targetScrollOffset || 0));
+    }
+
     scrollBy(deltaLocalY, immediate = false) {
       if (!this.allowManualScroll || !this.node) return false;
+      this.clampScroll();
       const maxScroll = (typeof this.getMaxScroll === 'function') ? this.getMaxScroll() : 0;
       if (maxScroll <= 0) return false;
       const next = Math.max(-maxScroll, Math.min(0, this.targetScrollOffset + deltaLocalY));

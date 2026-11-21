@@ -19,7 +19,9 @@
       woven: !!c.woven,
       plagueId: c.plagueId || null,
       under: c.underneath?.color || null,
-      cov: c.coveredComponent?.color || null
+      underPlague: c.underneath?.plagueId || null,
+      cov: c.coveredComponent?.color || null,
+      covPlague: c.coveredComponent?.plagueId || null
     });
   }
 
@@ -268,13 +270,22 @@
     }
 
     /** Renders removed/replaced tiles at pure fading opacity (1 -> 0) over 3 H-Beats. */
-    renderOutgoingComponents(ctx, math, originX, originY, hexRadius, elapsedTime) {
+    renderOutgoingComponents(ctx, math, originX, originY, hexRadius, elapsedTime, renderOpts = null) {
       if (!this.active || !this.fadeOutTiles.length || !ctx || !math) return;
       const alpha = Math.max(0, 1.0 - this.progress);
       if (alpha <= 0.005) return;
 
       const compR = hexRadius * (global.COSMOS_STATE?.placedScale || 0.65);
       const effR = hexRadius - 1.5;
+      const drawBezel = renderOpts?.drawBezelHex;
+      const backBgOp = renderOpts?.backBgOp ?? 0.40;
+      const backBorderOp = renderOpts?.backBorderOp ?? 0.80;
+      const pGreyBg = renderOpts?.pGreyBg ?? backBgOp;
+      const pGreyBorder = renderOpts?.pGreyBorder ?? backBorderOp;
+      const drawRingOrBezel = (x, y, col, bgOp, borderOp) => {
+        if (typeof drawBezel === 'function') drawBezel(x, y, effR, col, col, bgOp * alpha, borderOp * alpha);
+        else math.drawHexagon(ctx, x, y, effR, null, col, 2);
+      };
       const batch = [];
 
       ctx.save();
@@ -285,12 +296,25 @@
         const { x, y } = math.hexToScreen(q, r, originX, originY, hexRadius);
         const sp = (Math.abs(Math.sin(q * 12.9898 + r * 78.233) * 43758.5453)) % 1.0;
         const st = (Math.abs(Math.cos(q * 39.346 + r * 11.135) * 24634.6345)) % 1.0;
-        if (comp.fortified) math.drawHexagon(ctx, x, y, effR, null, `rgba(192,132,252,${0.6 * alpha})`, 2);
-        else if (comp.burned) math.drawHexagon(ctx, x, y, effR, null, `rgba(239,68,68,${0.6 * alpha})`, 2);
-        else if (comp.phased) math.drawHexagon(ctx, x, y, effR, null, `rgba(37,99,235,${0.6 * alpha})`, 2);
-        else if (comp.woven) math.drawHexagon(ctx, x, y, effR, null, `rgba(253,224,71,${0.6 * alpha})`, 2);
+        const covered = comp.coveredComponent || (comp.color === 'disease' && comp.underneath?.color && comp.underneath.color !== 'disease' ? comp.underneath : null);
+
+        if ((comp.phased || comp.burned) && comp.underneath?.color && global.PolyhedronRenderer) {
+          global.PolyhedronRenderer.drawComponent(ctx, x, y, compR, comp.underneath.color, elapsedTime, false, false, 0.95 * alpha, sp, st);
+        }
+        if (comp.fortified) drawRingOrBezel(x, y, '#c084fc', backBgOp, backBorderOp);
+        else if (comp.burned) drawRingOrBezel(x, y, '#ef4444', backBgOp, backBorderOp);
+        else if (comp.phased) drawRingOrBezel(x, y, '#2563eb', backBgOp, backBorderOp);
+        else if (comp.woven) drawRingOrBezel(x, y, '#fde047', backBgOp, backBorderOp);
+        else if (comp.color === 'disease' && covered?.color) {
+          if (global.PolyhedronRenderer) {
+            global.PolyhedronRenderer.drawComponent(ctx, x, y, compR, covered.color, elapsedTime, false, false, 0.95 * alpha, sp, st);
+          }
+          if (typeof drawBezel === 'function') drawBezel(x, y, effR, '#64748b', '#94a3b8', pGreyBg * alpha, pGreyBorder * alpha);
+        } else if (comp.color === 'disease' && comp.plagueId && global.ComponentDisease?.shapes?.get(comp.plagueId)?.offBoard) {
+          if (typeof drawBezel === 'function') drawBezel(x, y, effR, '#64748b', '#94a3b8', pGreyBg * alpha, pGreyBorder * alpha);
+        }
         if (comp.color) {
-          batch.push({ cx: x, cy: y, radius: comp.color === 'disease' && comp.coveredComponent ? compR * 0.8 : compR, colorName: comp.color, seedPhase: sp, seedTilt: st, customAlpha: alpha });
+          batch.push({ cx: x, cy: y, radius: comp.color === 'disease' && covered ? compR * 0.8 : compR, colorName: comp.color, seedPhase: sp, seedTilt: st, customAlpha: alpha });
         }
       });
       if (batch.length && global.PolyhedronRenderer) {

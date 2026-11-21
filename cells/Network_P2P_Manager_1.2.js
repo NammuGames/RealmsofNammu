@@ -398,14 +398,20 @@
     if (global.MatchOrchestrator?.initMatch) {
       const origInit = global.MatchOrchestrator.initMatch;
       global.MatchOrchestrator.initMatch = function(state, config) {
-        const res = origInit.call(this, state, config);
         if (self.role === 'host') {
           self._assignDefaultSeats(config?.playerCount || 1);
-          setTimeout(() => self.syncFullState('MATCH_START'), 1600);
+          self._awaitingMatchStartSync = true;
         }
-        return res;
+        return origInit.call(this, state, config);
       };
     }
+  };
+
+  /** Invoked once MatchOrchestrator finishes Round 0/1 setup and initial sigils. */
+  proto.onMatchStartComplete = function() {
+    if (!this._awaitingMatchStartSync || this.role !== 'host' || this._applyingRemote || !this.isConnected()) return;
+    this._awaitingMatchStartSync = false;
+    this.syncFullState('MATCH_START');
   };
 
   /** Invoked at the end of TurnManager Phase E (after tray refill & piece spawn state are finalized). */

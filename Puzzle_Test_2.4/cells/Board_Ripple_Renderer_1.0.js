@@ -142,11 +142,15 @@
       if (this.activeRipples.length === 0 || !this.scratchCanvas || !this.scratchCtx || !math) return;
 
       const safeDt = Math.min(0.1, Math.max(0.001, dt));
+      const nowMs = (typeof performance !== 'undefined' ? performance.now() : Date.now());
       const sCenter = this.scratchSize * 0.5;
 
       for (let i = this.activeRipples.length - 1; i >= 0; i--) {
         const ripple = this.activeRipples[i];
-        ripple.elapsed += safeDt;
+        if (ripple._wallStartMs === undefined) {
+          ripple._wallStartMs = nowMs - Math.max(0, (ripple.elapsed || 0) * 1000);
+        }
+        ripple.elapsed = Math.max(safeDt, (nowMs - ripple._wallStartMs) * 0.001);
 
         const t = ripple.elapsed / ripple.duration;
         if (typeof ripple.onTick === 'function') ripple.onTick(Math.min(1.0, t));

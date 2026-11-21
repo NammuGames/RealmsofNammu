@@ -31,7 +31,7 @@
   class TurnLogPlayerClass {
     constructor() {
       this.active = false;
-      this.stage = 'IDLE'; // 'IDLE' | 'TO_PRE' | 'TO_POST'
+      this.stage = 'IDLE'; // 'IDLE' | 'TO_PRE' | 'VIEW_PRE' | 'TO_POST' | 'VIEW_POST'
       this.entry = null;
       this.fromSnap = null;
       this.toSnap = null;
@@ -44,6 +44,7 @@
       this.fadeInSigilIds = new Set();
       this.fadeOutSigils = []; // [sigil]
       this.deferredTurnSnap = null; // Held target GameState snapshot for local START_TURN after backlog ends
+      this._showingSnapshot = false;
     }
 
     reset() {
@@ -58,6 +59,7 @@
       this.fadeInSigilIds.clear();
       this.fadeOutSigils = [];
       this.deferredTurnSnap = null;
+      this._showingSnapshot = false;
     }
 
     _getFadeDurationMs() {
@@ -114,6 +116,7 @@
       const lm = global.TurnLogManager;
       if (!lm || !toSnap) return false;
       this.active = true;
+      this._showingSnapshot = true;
       this.stage = stageName;
       this.fromSnap = fromSnap;
       this.toSnap = toSnap;
@@ -124,6 +127,20 @@
       lm.applyLogSnapshot(toSnap);
       global.GameState?.syncUI?.();
       global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
+      return true;
+    }
+
+    _beginViewHold(stageName) {
+      this.active = true;
+      this._showingSnapshot = true;
+      this.stage = stageName;
+      this.startMs = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      this.durationMs = this._getFadeDurationMs();
+      this.progress = 1.0;
+      this.fadeInTileKeys.clear();
+      this.fadeOutTiles = [];
+      this.fadeInSigilIds.clear();
+      this.fadeOutSigils = [];
       return true;
     }
 
@@ -145,8 +162,8 @@
         return this._beginFade(curSnap, target, stage);
       }
 
-      // Clicking "Next" mid-fade fast-forwards immediately
-      if (this.stage === 'TO_PRE') {
+      // Clicking "Next" during Pre-End fade or viewing jumps straight into Post-End fade
+      if (this.stage === 'TO_PRE' || this.stage === 'VIEW_PRE') {
         this.progress = 1.0;
         const from = this.entry?.preEnd || this.toSnap;
         if (this.entry?.postEnd) {
@@ -154,7 +171,7 @@
         }
       }
 
-      // Currently in TO_POST: finish current entry and jump straight into next queued entry if available
+      // Clicking "Next" during Post-End fade or hold finishes current entry and immediately advances
       this._completeCurrentEntry();
       if (lm.hasPendingEntries()) {
         return this.advanceOrSkip();
@@ -191,6 +208,7 @@
       const net = global.NetworkP2PManager;
       const deferred = this.deferredTurnSnap;
       this.deferredTurnSnap = null;
+      this._showingSnapshot = false;
 
       if (deferred && mc?.restorePuzzleState) {
         mc.restorePuzzleState(deferred);
@@ -211,11 +229,29 @@
       if (!this.active) return;
       const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
       const raw = (now - this.startMs) / Math.max(1, this.durationMs);
-      this.progress = Math.max(0.0, Math.min(1.0, raw));
-      if (this.progress >= 1.0) {
+
+      if (this.stage === 'TO_PRE' || this.stage === 'TO_POST') {
+        this.progress = Math.max(0.0, Math.min(1.0, raw));
+        if (this.progress < 1.0) return;
         if (this.stage === 'TO_PRE' && this.entry?.postEnd) {
-          this._beginFade(this.entry.preEnd || this.toSnap, this.entry.postEnd, 'TO_POST');
+          this._beginViewHold('VIEW_PRE');
+        } else if (this.stage === 'TO_POST' && !global.TurnLogManager?.hasPendingEntries?.()) {
+          this._beginViewHold('VIEW_POST');
         } else {
+          this._completeCurrentEntry();
+        }
+      } else if (this.stage === 'VIEW_PRE') {
+        this.progress = 1.0;
+        if (raw >= 1.0) {
+          if (this.entry?.postEnd) {
+            this._beginFade(this.entry.preEnd || this.toSnap, this.entry.postEnd, 'TO_POST');
+          } else {
+            this._completeCurrentEntry();
+          }
+        }
+      } else if (this.stage === 'VIEW_POST') {
+        this.progress = 1.0;
+        if (raw >= 1.0) {
           this._completeCurrentEntry();
         }
       }

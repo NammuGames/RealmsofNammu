@@ -385,6 +385,8 @@
     if (global.TurnManager?.completeRoundAdvancement) {
       const origComplete = global.TurnManager.completeRoundAdvancement;
       global.TurnManager.completeRoundAdvancement = function(...args) {
+        const prevIdx = global.GameState?.activePlayerIndex || 0;
+        if (self.isSeatLocal(prevIdx)) self.lastLocalActivePlayerIndex = prevIdx;
         const res = origComplete.apply(this, args);
         const curIdx = global.GameState?.activePlayerIndex || 0;
         if (self.isSeatLocal(curIdx)) self.lastLocalActivePlayerIndex = curIdx;

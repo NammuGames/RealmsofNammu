@@ -22,6 +22,22 @@
   UIDeckSync.syncNativeStatPodWithGameState = function() {
     if (!global.NativeStatPod || !global.GameState) return;
     const g = global.GameState;
+    const net = global.NetworkP2PManager;
+    const curIdx = g.activePlayerIndex || 0;
+    if (g.matchStarted && net && net.isSeatLocal?.(curIdx)) {
+      net.lastLocalActivePlayerIndex = curIdx;
+    }
+    const povIdx = (net?.isConnected?.() && net.getDefaultPausedPlayerIndex)
+      ? net.getDefaultPausedPlayerIndex()
+      : curIdx;
+    const povPlayerId = g.players?.[povIdx]?.id || (povIdx + 1);
+
+    // Preserve the Log-Show snapshot's Turn/Score/Vitality while Player stays locked to this device's POV player
+    if (global.TurnLogPlayer?.active || global.TurnLogPlayer?._showingSnapshot) {
+      global.NativeStatPod.setStat('player', povPlayerId.toString());
+      return;
+    }
+
     const pendingDmg = (typeof g.getPendingDamage === 'function')
       ? g.getPendingDamage()
       : (g.pendingDamage !== undefined ? g.pendingDamage : 0);
@@ -33,10 +49,10 @@
     const rawAve = (g.round > 0) ? (g.score / g.round) : 0;
     const ave = rawAve >= 100 ? Math.round(rawAve) : Number(rawAve.toFixed(rawAve >= 10 ? 1 : 2));
 
-    const pId = g.currentPlayerId || 1;
+    const turnPid = g.currentPlayerId || 1;
     global.NativeStatPod.setStats({
-      player: pId.toString(),
-      turn: `P${pId}`,
+      player: povPlayerId.toString(),
+      turn: `P${turnPid}`,
       round: (g.round || 1).toString(),
       points: pts.toString(),
       score: (g.score || 0).toString(),

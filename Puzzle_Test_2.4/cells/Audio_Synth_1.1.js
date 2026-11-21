@@ -83,9 +83,10 @@
     const queue = [];
     // Pre-bake menu/board click notes (MVB) first so early menu interactions never wait on heavy reverbs
     for (let i = 0; i < 12; i++) queue.push(['MVB', i]);
+    for (let i = 0; i < 12; i++) queue.push(['SPK', i]);
     for (let i = 0; i < 12; i++) queue.push(['CFL', i]);
     queue.push(['XDM', SETS.XDM.idx], ['DGS', SETS.DGS.idx], ['GSF', SETS.GSF.idx], ['GDA', SETS.GDA.idx]);
-    for (let i = 0; i < 12; i++) queue.push(['SPK', i], ['PWM', i], ['DGD', i], ['SPM', i]);
+    for (let i = 0; i < 12; i++) queue.push(['PWM', i], ['DGD', i], ['SPM', i]);
     for (let i = 0; i < 12; i++) queue.push(['BGM', i]);
     const step = () => {
       if (!queue.length) return;

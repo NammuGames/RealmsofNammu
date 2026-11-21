@@ -72,6 +72,7 @@
     'cells/Orbit_Particle_Renderer.js',
     'cells/Board_Renderer_1.0.js',
     'cells/Board_Renderer_1.1.js',
+    'cells/Board_Renderer_1.2.js',
     'cells/Board_Renderer.js',
     'cells/Warp_Halo_Renderer.js',
     'cells/Board_Cursor_Renderer_1.0.js',

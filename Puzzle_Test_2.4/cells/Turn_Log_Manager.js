@@ -171,8 +171,13 @@
 
       if (snap.stats) {
         const st = snap.stats;
+        const net = global.NetworkP2PManager;
+        const povIdx = (net?.isConnected?.() && net.getDefaultPausedPlayerIndex)
+          ? net.getDefaultPausedPlayerIndex()
+          : (g.activePlayerIndex || 0);
+        const povPlayerId = g.players?.[povIdx]?.id || (povIdx + 1);
         global.NativeStatPod?.setStats?.({
-          player: st.player, turn: st.turn, round: st.round,
+          player: String(povPlayerId), turn: st.turn, round: st.round,
           score: st.score, ave: st.ave, combo: st.combo
         });
         global.NativeVitalityPod?.setHp?.(st.hp ?? 12, st.pendingDamage || 0, st.pendingHeal || 0);

@@ -268,7 +268,7 @@
         }
       }
       const baseWarpScale = this.state?.warpRenderScale || 0.75;
-      const warpScale = (isCoarseMobile && baseWarpScale >= 0.7) ? 0.25 : baseWarpScale;
+      const warpScale = (isCoarseMobile && baseWarpScale >= 0.7) ? 0.35 : baseWarpScale;
 
       // Enforce Landscape-Only: never CSS-rotate #canvas-board-overlay sideways
       if (canvasBoard) {

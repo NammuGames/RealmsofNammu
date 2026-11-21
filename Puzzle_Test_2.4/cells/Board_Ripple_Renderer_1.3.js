@@ -58,15 +58,23 @@
       if (typeof onComplete === 'function') onComplete();
       return;
     }
-    this.materialSpawnAnim = {
+    const durMs = (durationSec || H3_SEC) * 1000;
+    const anim = {
       startTime: (typeof performance !== 'undefined' ? performance.now() : Date.now()),
-      durationMs: (durationSec || H3_SEC) * 1000,
+      durationMs: durMs,
       components,
       scale: 1.0,
       isDespawn: true,
       maxRadius: 50,
       onComplete
     };
+    anim._fallbackTimer = setTimeout(() => {
+      if (this.materialSpawnAnim !== anim || anim._done) return;
+      anim._done = true;
+      this.materialSpawnAnim = null;
+      if (typeof onComplete === 'function') onComplete();
+    }, Math.ceil(durMs) + 60);
+    this.materialSpawnAnim = anim;
   };
 
   proto.getMaterialAnimScale = function() {
@@ -86,6 +94,7 @@
     anim.scale = s;
     if (t >= 1.0 && !anim._done) {
       anim._done = true;
+      if (anim._fallbackTimer) clearTimeout(anim._fallbackTimer);
       const cb = anim.onComplete;
       this.materialSpawnAnim = null;
       if (typeof cb === 'function') cb();
@@ -106,6 +115,7 @@
     if (t >= 1.0) {
       if (!anim._done) {
         anim._done = true;
+        if (anim._fallbackTimer) clearTimeout(anim._fallbackTimer);
         const cb = anim.onComplete;
         this.materialSpawnAnim = null;
         if (typeof cb === 'function') cb();

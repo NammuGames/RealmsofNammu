@@ -116,10 +116,11 @@
         if (oids.size === 0) { this.lockedSigilIds.add(cand.id); unassigned.delete(cand.id); }
       }
 
-      // Contested candidates: randomly choose 1 to lock
+      // Contested candidates: choose 1 to lock (deterministic sorted order for synced online starts)
       while (unassigned.size > 0) {
         const idList = Array.from(unassigned);
-        const chosenId = idList[Math.floor(Math.random() * idList.length)];
+        if (options.deterministic) idList.sort();
+        const chosenId = options.deterministic ? idList[0] : idList[Math.floor(Math.random() * idList.length)];
         this.lockedSigilIds.add(chosenId);
         unassigned.delete(chosenId);
         (this.overlapsMap.get(chosenId) || []).forEach(oid => {

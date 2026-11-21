@@ -88,7 +88,9 @@
     );
     const cursorsEngaged = !!(g.inSigilStage || spellCursorsActive);
     const isPreRound1 = !g.matchStarted || g.isMatchStarting || g.isMatchEnding;
-    if (!isPlaced && !cursorsEngaged && !g.isMaterialSelected && !isPreRound1) {
+    const net = global.NetworkP2PManager;
+    const isSpectating = !!(net?.isConnected?.() && !net.isLocalPlayersTurn());
+    if (!isPlaced && !cursorsEngaged && !g.isMaterialSelected && !isPreRound1 && !isSpectating) {
       g.isMaterialSelected = true;
       g.selectedTrayIndex = 0;
     }
@@ -307,6 +309,20 @@
           btn.setGhost(true); btn.setHighlight(false);
           const t = btn.getTrait('text'); if (t) t.titleColor = '#64748b';
         }
+      }
+    } else if (isSpectating) {
+      const hasLogNext = !!(global.TurnLogManager?.hasPendingEntries?.() || global.TurnLogPlayer?.active);
+      [0, 2, 3, 4].forEach(i => {
+        const btn = rightButtonNodes[i];
+        if (btn) {
+          btn.setGhost(true); btn.setHighlight(false);
+          const t = btn.getTrait('text'); if (t) t.titleColor = '#64748b';
+        }
+      });
+      const btnEnd = rightButtonNodes[5];
+      if (btnEnd && !hasLogNext) {
+        btnEnd.setGhost(true); btnEnd.setHighlight(false);
+        const t = btnEnd.getTrait('text'); if (t) t.titleColor = '#64748b';
       }
     }
   };

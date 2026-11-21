@@ -57,6 +57,7 @@
           nodes.forEach(n => this.applyConfigToNode(n, cfg, g));
         }
       });
+      global.NativeStatPod?.updatePlayerTurnHighlight?.();
       this.syncUIFromTarget(this.currentTarget);
     }
 

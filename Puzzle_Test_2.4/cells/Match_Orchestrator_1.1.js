@@ -30,8 +30,9 @@
    * @param {Object} state - GameState instance
    * @param {Object} config - Match configuration
    */
-  proto.initMatch = function(state, config) {
+  proto.initMatch = function(state, config, options = {}) {
     if (!state || !config) return;
+    const preRolled = options?.preRolled || null;
     state.matchConfig = config;
     state.isEndless = !!config.isEndless || config.rounds === '∞';
     state.maxRounds = state.isEndless ? '∞' : (Number(config.rounds) || 12);
@@ -78,8 +79,43 @@
       }
     }
 
-    // 2. Build Round Schedule (keep Tray & Spellbook hidden until Round 1 starts)
+    // 2. Build Round Schedule & pre-determine Round 0/1 rosters + spawns so online peers animate in lockstep
     this.buildRoundSchedule(config);
+    let plannedPlayers = null, plannedRound0 = null, plannedRound1 = null;
+    if (preRolled?.players) {
+      plannedPlayers = JSON.parse(JSON.stringify(preRolled.players));
+      plannedRound0 = Array.isArray(preRolled.round0Spawns) ? preRolled.round0Spawns : [];
+      plannedRound1 = Array.isArray(preRolled.round1Spawns) ? preRolled.round1Spawns : [];
+    } else {
+      const startingSpells = Math.max(0, Math.min(3, Number(config.startingSpells ?? 0)));
+      plannedPlayers = [];
+      for (let i = 0; i < state.playerCount; i++) {
+        const theme = PLAYER_THEMES[i % PLAYER_THEMES.length];
+        const spellbook = global.MaterialsData?.createDefaultSpellbook?.(false, startingSpells) || [];
+        state.spellbook = spellbook;
+        state.enablePermanentSpellbook();
+        const tray = [];
+        for (let m = 0; m < 6; m++) {
+          const excluded = tray.map(item => item.id);
+          const mat = this.createMatchMaterial(state, excluded, 0);
+          if (mat) tray.push(mat);
+        }
+        plannedPlayers.push({
+          id: theme.id, name: theme.name, color: theme.color, accent: theme.accent,
+          hp: 12, maxHp: 12, pendingHeal: 0, score: 0, turnsPlayed: 0,
+          materialsTray: tray, spellbook, componentsBag: Array(12).fill(null), overflowSpells: []
+        });
+      }
+      state.spellbook = [];
+      const occ = new Set();
+      plannedRound0 = this.planRoundSpawns ? this.planRoundSpawns(state, 0, occ) : [];
+      plannedRound1 = this.planRoundSpawns ? this.planRoundSpawns(state, 1, occ) : [];
+      if (!options?.fromRemote && global.NetworkP2PManager?.role === 'host' && global.NetworkP2PManager?.isConnected?.()) {
+        global.NetworkP2PManager.broadcastMatchStartInit?.({
+          config, players: plannedPlayers, round0Spawns: plannedRound0, round1Spawns: plannedRound1
+        });
+      }
+    }
     state.syncUI();
     global.UICardsDeck?.syncMaterialsQueueColumn?.();
     global.UICardsDeck?.syncSpellbookColumn?.();
@@ -87,36 +123,15 @@
     const runRound0Operations = () => {
       if (!state.matchStarted) return;
 
-      // 3. Round 0 Operations: Create Revolving Player Roster & roll Round 0 Material Luck/Blight
-      const startingSpells = Math.max(0, Math.min(3, Number(config.startingSpells ?? 0)));
-      state.players = [];
-      for (let i = 0; i < state.playerCount; i++) {
-        const theme = PLAYER_THEMES[i % PLAYER_THEMES.length];
-        const spellbook = global.MaterialsData?.createDefaultSpellbook?.(false, startingSpells) || [];
-        state.spellbook = spellbook;
-        state.enablePermanentSpellbook();
-
-        const tray = [];
-        for (let m = 0; m < 6; m++) {
-          const excluded = tray.map(item => item.id);
-          const mat = this.createMatchMaterial(state, excluded, 0);
-          if (mat) tray.push(mat);
-        }
-
-        state.players.push({
-          id: theme.id, name: theme.name, color: theme.color, accent: theme.accent,
-          hp: 12, maxHp: 12, pendingHeal: 0, score: 0, turnsPlayed: 0,
-          materialsTray: tray, spellbook, componentsBag: Array(12).fill(null), overflowSpells: []
-        });
-      }
-      // Keep active tray & spellbook hidden until Round 1 begins
+      // 3. Round 0 Operations: Assign pre-rolled Revolving Player Roster (kept hidden until Round 1)
+      state.players = plannedPlayers || [];
       state.materialsTray = [];
       state.spellbook = [];
       state.isMaterialSelected = false;
 
       const startRound1Operations = () => {
         if (!state.matchStarted) return;
-        // 4. Round 1 Begins: Reveal Player 1 roster (materials tray + spellbook) & roll Round 1 Playfield spawns
+        // 4. Round 1 Begins: Reveal Player 1 roster (materials tray + spellbook) & play Round 1 spawns
         this.loadPlayerIntoState(state, 0);
         state.placedThisTurn = true;
         state.isMaterialSelected = false;
@@ -128,16 +143,18 @@
           if (!state.matchStarted) return;
           const finishActivation = () => {
             if (!state.matchStarted) return;
+            const net = global.NetworkP2PManager;
+            const isLocalTurn = !net?.isConnected?.() || net.isLocalPlayersTurn();
             state.isMatchStarting = false;
             state.turnPhase = 'MID_TURN';
             state.placedThisTurn = false;
-            state.isMaterialSelected = true;
+            state.isMaterialSelected = isLocalTurn;
             state.selectedTrayIndex = 0;
             state.selectedRotation = 0;
             state.upDownAxisState = 0;
             state.placementCursor = { q: 0, r: 0 };
 
-            const activeMat = state.getActiveMaterial ? state.getActiveMaterial() : null;
+            const activeMat = isLocalTurn && state.getActiveMaterial ? state.getActiveMaterial() : null;
             const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);
             if (activeMat && activeMat.activeCoords && global.BoardRippleRenderer?.playMaterialSpawnPulse) {
               const coordsWithColors = activeMat.activeCoords.map(([dq, dr], idx) => ({
@@ -157,22 +174,26 @@
             global.UICardsDeck?.syncMaterialsQueueColumn?.();
             global.UICardsDeck?.syncSpellbookColumn?.();
             global.BoardRenderer?.render?.();
-            global.NetworkP2PManager?.onMatchStartComplete?.();
+            global.MemoryCardManager?.saveActivePuzzleMatch?.();
           };
 
           const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);
           state.evaluateSigils();
           if (global.SigilResolver && state.board) {
-            global.SigilResolver.resolveInitialSigils(state.board, { durationSec: h3Sec, onComplete: finishActivation });
+            global.SigilResolver.resolveInitialSigils(state.board, {
+              durationSec: h3Sec,
+              deterministic: !!global.NetworkP2PManager?.isConnected?.(),
+              onComplete: finishActivation
+            });
           } else {
             finishActivation();
           }
         };
 
-        this.spawnPlayfieldForRound(state, 1, finalizeRound1, false);
+        this.spawnPlayfieldForRound(state, 1, finalizeRound1, false, plannedRound1);
       };
 
-      this.spawnPlayfieldForRound(state, 0, startRound1Operations, false);
+      this.spawnPlayfieldForRound(state, 0, startRound1Operations, false, plannedRound0);
     };
 
     if (global.BoardRenderer?.startMatchStartAnim) {

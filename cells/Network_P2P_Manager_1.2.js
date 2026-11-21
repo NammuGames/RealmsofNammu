@@ -1,7 +1,7 @@
 /**
- * @fileoverview cells/Network_P2P_Manager_1.2.js - Sync Protocol, Puzzle Hooks & Drawer UI (Part 3/3)
- * @description Attaches message routing, reliable STATE_SYNC/STATE_ACK retry delivery, spectator
- * turn locks, Phase E turn-end sync hook, Tuning Drawer UI, and global singleton registration.
+ * @fileoverview cells/Network_P2P_Manager_1.2.js - Wire Sync Protocol & Remote Replay (Part 3/4)
+ * @description Attaches message routing, reliable STATE_SYNC/STATE_ACK retry delivery, and remote
+ * cursor/action/state replay onto NetworkP2PManagerClass. (Puzzle hooks & Drawer UI live in Part 1.3).
  * Strictly adheres to the 500-line hard cap and underscore naming conventions.
  */
 
@@ -159,6 +159,14 @@
       return;
     }
 
+    if (msg.type === 'MATCH_START_INIT' && this.role === 'guest' && msg.config) {
+      if (msg.syncId) this._publishRoom?.({ type: 'STATE_ACK', syncId: msg.syncId }, fromPeerId);
+      if (msg.syncId && msg.syncId === this._lastRemoteSyncKey) return;
+      this._lastRemoteSyncKey = msg.syncId || '';
+      this._applyRemoteMatchStartInit(msg);
+      return;
+    }
+
     if (msg.type === 'STATE_SYNC' && msg.snap) {
       if (msg.syncId) this._publishRoom?.({ type: 'STATE_ACK', syncId: msg.syncId }, fromPeerId);
       if (msg.syncId && msg.syncId === this._lastRemoteSyncKey) return;
@@ -308,154 +316,4 @@
       this._updateDrawerUI();
     } finally { this._applyingRemote = false; }
   };
-
-  // ── PUZZLE BOARD LOCK & TURN-END SYNC HOOKS ───────────────────────────────
-  proto.hookPuzzleNetwork = function() {
-    if (this._puzzleHooked) return;
-    this._puzzleHooked = true;
-    const self = this;
-
-    const guardTurn = (fn) => function(...args) {
-      if (!self._applyingRemote && self.isConnected() && !self.isLocalPlayersTurn()) {
-        global.AudioSynth?.playCancel?.();
-        global.GameState?.showToast?.('👀 Spectating — board locked until your turn');
-        return false;
-      }
-      return fn.apply(this, args);
-    };
-
-    const g = global.GameState;
-    if (g) {
-      ['moveDirection', 'rotatePiece', 'placeActiveMaterial', 'confirmPlacementAndExit'].forEach((m) => {
-        if (typeof g[m] !== 'function') return;
-        const orig = g[m];
-        g[m] = guardTurn(function(...args) {
-          const res = orig.apply(this, args);
-          if (!self._applyingRemote && self.isConnected() && !self.turnOnlySync) {
-            if (m === 'moveDirection') self._emit('ACTION', { op: 'MOVE', dir: args[0] });
-            else if (m === 'rotatePiece') self._emit('ACTION', { op: 'ROTATE', dir: args[0] });
-            else if (m === 'placeActiveMaterial') { self._emit('ACTION', { op: 'PLACE' }); self.syncFullState('PLACE'); }
-            else if (m === 'confirmPlacementAndExit') { self._emit('ACTION', { op: 'CONFIRM' }); self.syncFullState('CONFIRM'); }
-            self.broadcastCursorThrottled();
-          }
-          return res;
-        });
-      });
-    }
-
-    if (global.InputController?.handleBoardClick) {
-      const origClick = global.InputController.handleBoardClick;
-      global.InputController.handleBoardClick = guardTurn(function(sx, sy) {
-        const res = origClick.call(this, sx, sy);
-        if (!self._applyingRemote && self.isConnected() && !self.turnOnlySync) {
-          self._emit('ACTION', { op: 'CLICK', sx, sy });
-          self.broadcastCursorThrottled();
-        }
-        return res;
-      });
-    }
-
-    if (global.SpellManager?.castSpell) {
-      global.SpellManager.castSpell = guardTurn(global.SpellManager.castSpell);
-    }
-
-    if (global.UndoManager?.undoLastAction) {
-      const origUndo = global.UndoManager.undoLastAction;
-      global.UndoManager.undoLastAction = guardTurn(function(...args) {
-        const res = origUndo.apply(this, args);
-        if (!self._applyingRemote && self.isConnected() && res !== false && !self.turnOnlySync) {
-          self._emit('ACTION', { op: 'UNDO' });
-          self.syncFullState('UNDO');
-        }
-        return res;
-      });
-    }
-
-    if (global.TurnManager?.endTurn) {
-      const origEnd = global.TurnManager.endTurn;
-      global.TurnManager.endTurn = guardTurn(function(...args) {
-        const res = origEnd.apply(this, args);
-        if (!self._applyingRemote && self.isConnected() && res !== false && !self.turnOnlySync) {
-          self._emit('ACTION', { op: 'END_TURN' });
-        }
-        return res;
-      });
-    }
-
-    if (global.TurnManager?.completeRoundAdvancement) {
-      const origComplete = global.TurnManager.completeRoundAdvancement;
-      global.TurnManager.completeRoundAdvancement = function(...args) {
-        const prevIdx = global.GameState?.activePlayerIndex || 0;
-        if (self.isSeatLocal(prevIdx)) self.lastLocalActivePlayerIndex = prevIdx;
-        const res = origComplete.apply(this, args);
-        const curIdx = global.GameState?.activePlayerIndex || 0;
-        if (self.isSeatLocal(curIdx)) self.lastLocalActivePlayerIndex = curIdx;
-        self._updateDrawerUI();
-        return res;
-      };
-    }
-
-    if (global.MatchOrchestrator?.initMatch) {
-      const origInit = global.MatchOrchestrator.initMatch;
-      global.MatchOrchestrator.initMatch = function(state, config) {
-        if (self.role === 'host') {
-          self._assignDefaultSeats(config?.playerCount || 1);
-          self._awaitingMatchStartSync = true;
-        }
-        return origInit.call(this, state, config);
-      };
-    }
-  };
-
-  /** Invoked once MatchOrchestrator finishes Round 0/1 setup and initial sigils. */
-  proto.onMatchStartComplete = function() {
-    if (!this._awaitingMatchStartSync || this.role !== 'host' || this._applyingRemote || !this.isConnected()) return;
-    this._awaitingMatchStartSync = false;
-    this.syncFullState('MATCH_START');
-  };
-
-  /** Invoked at the end of TurnManager Phase E (after tray refill & piece spawn state are finalized). */
-  proto.onTurnAdvancementComplete = function() {
-    const curIdx = global.GameState?.activePlayerIndex || 0;
-    if (this.isSeatLocal(curIdx)) this.lastLocalActivePlayerIndex = curIdx;
-    if (!this._applyingRemote && this.isConnected()) {
-      this.syncFullState('TURN_END');
-    }
-    this._updateDrawerUI();
-  };
-
-  // ── TUNING DRAWER P2P CONTROLS ────────────────────────────────────────────
-  proto._wireDrawerUI = function() {
-    const d = document;
-    d.getElementById('btn-p2p-host')?.addEventListener('click', () => this.hostRoom());
-    d.getElementById('btn-p2p-host-saved')?.addEventListener('click', () => this.hostSavedMatch());
-    d.getElementById('btn-p2p-join')?.addEventListener('click', () => {
-      const val = d.getElementById('input-p2p-room-code')?.value || '';
-      this.joinRoom(val);
-    });
-    d.getElementById('btn-p2p-pass-host')?.addEventListener('click', () => this.passHost());
-    d.getElementById('btn-p2p-leave')?.addEventListener('click', () => this.leaveRoom());
-  };
-
-  proto._updateDrawerUI = function() {
-    const statusEl = document.getElementById('p2p-status-box');
-    if (statusEl) {
-      if (this.role === 'offline') {
-        statusEl.textContent = 'Status: Offline (Local Mode)';
-      } else {
-        const turnState = this.isLocalPlayersTurn() ? 'YOUR TURN' : 'SPECTATING (Locked)';
-        statusEl.textContent = `Role: ${this.role.toUpperCase()} | Room: ${this.roomCode}\nPeers: ${this.connections.size} | ${turnState}`;
-      }
-    }
-    const gsc = global.GameSettingsCanvas;
-    const topTitle = gsc?.history?.length ? gsc.history[gsc.history.length - 1]?.title : '';
-    if (gsc?.active && (gsc.mode === 'pause' || !topTitle || topTitle === 'Root' || topTitle === 'Lobby' || topTitle === 'Host' || topTitle === 'Join')) {
-      gsc.rebuildTopFrame?.();
-    }
-  };
-
-  const instance = new global.NetworkP2PManagerClass();
-  global.NetworkP2PManager = instance;
-  global.ROLL_CALL = global.ROLL_CALL || new Map();
-  global.ROLL_CALL.set('Network_P2P_Manager', instance);
 })(typeof window !== 'undefined' ? window : this);

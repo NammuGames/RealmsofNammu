@@ -78,7 +78,7 @@
                 growProgress = resolver.transitionProgress;
               }
             }
-            growProgress = Math.min(growProgress, oppositeAlpha);
+            growProgress = Math.min(growProgress, oppositeAlpha, global.TurnLogPlayer?.getAuroraProgress?.(sA.id, sB.id) ?? 1.0);
             if (growProgress <= 0.001) return;
 
             const pA = math.vertexToScreen(vA, originX, originY, hexRadius);
@@ -114,6 +114,7 @@
           });
         }
       }
+      global.TurnLogPlayer?.renderOutgoingAurora?.(ctx, math, originX, originY, hexRadius, time, oppositeAlpha, this);
     }
 
     // 3. Arch Spell Conduit Connections (Orange Plasma Arc)
@@ -127,7 +128,8 @@
       archZones.push(ft.snapshot.previewArchZone);
     }
 
-    if ((layer === 'all' || layer === 'plasma' || layer === 'aurora_plasma') && archZones.length > 0) {
+    const hasOutPlasma = !!global.TurnLogPlayer?.hasOutgoingPlasma?.();
+    if ((layer === 'all' || layer === 'plasma' || layer === 'aurora_plasma') && (archZones.length > 0 || hasOutPlasma)) {
       const sigils = (state.activeSigils && state.activeSigils.length > 0) ? state.activeSigils : (state.allCandidates || []);
       const hexWidth = hexRadius * Math.sqrt(3);
       const seenCaps = new Map();
@@ -138,6 +140,7 @@
         if (!prev || alpha > prev.alpha) seenCaps.set(k, { pos, rgb, alpha });
       };
       const zoneAlpha = (z) => (z?.id === 'preview_arch' ? flowerAlpha : baseArchAlpha);
+      const lp = global.TurnLogPlayer;
 
       const ENCH_PLASMA_RGB = {
         'lock': '149, 63, 253', // Stone PPR (#953ffd)
@@ -163,7 +166,8 @@
       // 0. Ensure every Arch center node (confirmed and preview) renders even with no connections
       archZones.forEach(z => {
         if (!z?.center) return;
-        const eAlpha = zoneAlpha(z);
+        const capLogA = (z.id === 'preview_arch') ? 1.0 : (lp?.getPlasmaCapAlpha?.(z.center.q, z.center.r) ?? 1.0);
+        const eAlpha = zoneAlpha(z) * capLogA;
         if (eAlpha <= 0.001) return;
         addCap(math.hexToScreen(z.center.q, z.center.r, originX, originY, hexRadius), getZoneColorRgb(z), eAlpha);
       });
@@ -175,7 +179,10 @@
       // 1. Inter-Arch touching pseudo-sigil connections
       interArchEdges.forEach(([zA, zB]) => {
         if (!zA.center || !zB.center) return;
-        const eAlpha = Math.min(zoneAlpha(zA), zoneAlpha(zB));
+        const kA = `${zA.center.q},${zA.center.r}`, kB = `${zB.center.q},${zB.center.r}`;
+        const edgeKey = `ia:${kA < kB ? `${kA}|${kB}` : `${kB}|${kA}`}`;
+        const isPrev = (zA.id === 'preview_arch' || zB.id === 'preview_arch');
+        const eAlpha = Math.min(zoneAlpha(zA), zoneAlpha(zB)) * (isPrev ? 1.0 : (lp?.getPlasmaEdgeAlpha?.(edgeKey) ?? 1.0));
         if (eAlpha <= 0.001) return;
         const posA = math.hexToScreen(zA.center.q, zA.center.r, originX, originY, hexRadius);
         const posB = math.hexToScreen(zB.center.q, zB.center.r, originX, originY, hexRadius);
@@ -188,7 +195,8 @@
       // 2. Real Sigils to Arch conduits
       sigilArchEdges.forEach(({ sigil, zone }) => {
         if (!zone.center || sigil.detonated) return;
-        const eAlpha = zoneAlpha(zone);
+        const edgeKey = `sa:${sigil.id}|${zone.center.q},${zone.center.r}`;
+        const eAlpha = zoneAlpha(zone) * (zone.id === 'preview_arch' ? 1.0 : (lp?.getPlasmaEdgeAlpha?.(edgeKey) ?? 1.0));
         if (eAlpha <= 0.001) return;
         const lockedIds = resolver?.lockedSigilIds || state.lockedSigilIds;
         if (lockedIds && !lockedIds.has(sigil.id)) return;
@@ -206,7 +214,8 @@
       // 3. Burn Arch to disease tokens
       (diseaseArchEdges || []).forEach(({ zone, tileKey }) => {
         if (!zone.center) return;
-        const eAlpha = zoneAlpha(zone);
+        const edgeKey = `da:${tileKey}|${zone.center.q},${zone.center.r}`;
+        const eAlpha = zoneAlpha(zone) * (zone.id === 'preview_arch' ? 1.0 : (lp?.getPlasmaEdgeAlpha?.(edgeKey) ?? 1.0));
         if (eAlpha <= 0.001) return;
         const [dq, dr] = tileKey.split(',').map(Number);
         const posDis = math.hexToScreen(dq, dr, originX, originY, hexRadius);
@@ -216,6 +225,10 @@
         addCap(posZone, rgb, eAlpha);
         addCap(posDis, rgb, eAlpha);
       });
+
+      if (hasOutPlasma) {
+        lp.renderOutgoingPlasma(ctx, math, originX, originY, hexRadius, time, baseArchAlpha, addCap);
+      }
 
       // Terminal discharge center point & 3 jittery rings layered strictly OVER plasma lines
       if (fx?.drawPlasmaCap) {

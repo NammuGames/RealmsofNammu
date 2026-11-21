@@ -39,6 +39,33 @@
     };
   }
 
+  function canonicalizeSnapshot(snap) {
+    if (!snap) return null;
+    const comps = (snap.components || []).slice().sort((a, b) => (a?.k || '').localeCompare(b?.k || ''));
+    const sigils = (snap.activeSigils || []).slice().sort((a, b) => (a?.id || '').localeCompare(b?.id || ''));
+    const arches = (snap.archZones || []).slice().sort((a, b) => {
+      const ka = `${a?.center?.q ?? 0},${a?.center?.r ?? 0}`;
+      const kb = `${b?.center?.q ?? 0},${b?.center?.r ?? 0}`;
+      return ka.localeCompare(kb);
+    });
+    const shapes = (snap.disease?.shapes || []).map(s => ({
+      ...s,
+      components: (s?.components || []).slice().sort((a, b) => (a?.key || '').localeCompare(b?.key || ''))
+    })).sort((a, b) => String(a?.id || '').localeCompare(String(b?.id || '')));
+    return JSON.stringify({
+      components: comps,
+      disease: snap.disease ? { nextId: snap.disease.nextId || 0, shapes } : null,
+      archZones: arches,
+      activeSigils: sigils,
+      stats: snap.stats || null
+    });
+  }
+
+  function areLogSnapshotsEqual(a, b) {
+    if (!a || !b) return false;
+    return canonicalizeSnapshot(a) === canonicalizeSnapshot(b);
+  }
+
   class TurnLogManagerClass {
     constructor() {
       this.matchId = null;
@@ -105,6 +132,7 @@
         spell: s.spell,
         colors: Array.isArray(s.colors) ? s.colors.slice() : [],
         isWild: !!s.isWild,
+        wildPermutationIndex: s.wildPermutationIndex ?? 0,
         element: s.element,
         category: s.category
       }));
@@ -119,8 +147,8 @@
       };
     }
 
-    /** Applies a snapshot onto GameState + Stat Pods and re-derives dormant sigils locally. */
-    applyLogSnapshot(snap) {
+    /** Applies a snapshot onto GameState + Stat Pods and extrapolates dormant sigils & alignments locally. */
+    applyLogSnapshot(snap, opts = {}) {
       const g = global.GameState;
       if (!snap || !g || !g.board) return false;
 
@@ -162,12 +190,38 @@
       g.archZones = deepClone(snap.archZones || []);
 
       if (global.SigilResolver) {
+        const sr = global.SigilResolver;
         const lockedIds = new Set();
-        (snap.activeSigils || []).forEach(s => { if (s?.id) lockedIds.add(s.id); });
-        global.SigilResolver.lockedSigilIds = lockedIds;
-        global.SigilResolver.activeSigils = (snap.activeSigils || []).map(s => deepClone(s));
+        (snap.activeSigils || []).forEach(s => {
+          if (!s?.id) return;
+          lockedIds.add(s.id);
+          if (s.isWild && s.formula) {
+            sr.savedWildSelections?.set?.(s.id, {
+              formula: s.formula,
+              permIndex: s.wildPermutationIndex ?? 0
+            });
+          }
+        });
+        sr.lockedSigilIds = lockedIds;
+        sr.activeSigils = (snap.activeSigils || []).map(s => deepClone(s));
+        sr.isTransitionActive = false;
+        sr.transitionProgress = 1.0;
+        sr.newlyFormedSigilIds?.clear?.();
+        sr.newlyFormedPairKeys?.clear?.();
+        sr.activatingSigilIds?.clear?.();
+        sr.deactivatingSigilIds?.clear?.();
+        sr.growingPairKeys?.clear?.();
+        sr.retractingPairKeys?.clear?.();
+        sr.retractingPairs = [];
       }
       g.evaluateSigils?.();
+      if (global.SigilResolver) {
+        const sr = global.SigilResolver;
+        sr.dormantSigilIds.clear();
+        (sr.allCandidates || []).forEach(c => {
+          if (c?.id && !sr.lockedSigilIds.has(c.id)) sr.dormantSigilIds.add(c.id);
+        });
+      }
 
       if (snap.stats) {
         const st = snap.stats;
@@ -184,7 +238,7 @@
         if (Array.isArray(st.componentsBag)) global.NativeVitalityPod?.setComponents?.(st.componentsBag);
       }
 
-      global.BoardRenderer?.render?.();
+      if (!opts.skipRender) global.BoardRenderer?.render?.();
       return true;
     }
 
@@ -207,11 +261,16 @@
       return this._pendingPostEnd;
     }
 
+    areSnapshotsEqual(a, b) {
+      return areLogSnapshotsEqual(a, b);
+    }
+
     /** Step 2B: finalize Turn Log entry after active player/round rotation completes. */
     finishLocalEndTurn(afterMeta = {}) {
       const g = global.GameState;
       const preEnd = this._pendingPreEnd || this.captureLogSnapshot('PRE_END');
-      const postEnd = this._pendingPostEnd || this.captureLogSnapshot('POST_END');
+      const rawPostEnd = this._pendingPostEnd || this.captureLogSnapshot('POST_END');
+      const postEnd = areLogSnapshotsEqual(preEnd, rawPostEnd) ? null : rawPostEnd;
       const meta = this._pendingMeta || {
         playerIndex: g?.activePlayerIndex || 0,
         playerId: g?.currentPlayerId || 1,

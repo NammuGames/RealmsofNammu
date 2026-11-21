@@ -97,6 +97,10 @@
         }
       });
     }
+    const outSigilStyles = global.TurnLogPlayer?.getOutgoingLockedTileStyles?.(global.BoardOverlayRenderer);
+    if (outSigilStyles && outSigilStyles.length > 0) {
+      for (let i = 0; i < outSigilStyles.length; i++) lockedTileStyles.push(outSigilStyles[i]);
+    }
 
     const spellFlowerMap = new Map();
     const cr = global.BoardCursorRenderer;

@@ -134,6 +134,7 @@
     drawBatchedNodes(ctx, nodes, time, scale = 1) {
       if (!nodes || nodes.length === 0 || !this.capSprite) return;
       const rippleRenderer = global.BoardRippleRenderer;
+      const lp = global.TurnLogPlayer;
       for (let i = 0; i < nodes.length; i++) {
         const n = nodes[i];
         let animScale = 1.0;
@@ -141,12 +142,14 @@
           const anim = rippleRenderer.getTileAnimState(n.q, n.r);
           if (anim && anim.scale !== undefined) animScale = anim.scale;
         }
-        if (animScale <= 0.01) continue;
+        const logAlpha = (n._forcedAlpha !== undefined) ? n._forcedAlpha : ((n.q !== undefined && lp?.getDiseaseNodeAlpha) ? lp.getDiseaseNodeAlpha(`${n.q},${n.r}`) : 1.0);
+        const nodeAlpha = animScale * logAlpha;
+        if (animScale <= 0.01 || nodeAlpha <= 0.01) continue;
         const pulse = 1.0 + 0.12 * Math.sin(time * 3.0 + i);
         const s = 34 * scale * pulse * animScale;
-        if (animScale < 0.99) {
+        if (nodeAlpha < 0.99) {
           ctx.save();
-          ctx.globalAlpha = animScale;
+          ctx.globalAlpha = nodeAlpha;
           ctx.drawImage(this.capSprite, n.x - s / 2, n.y - s / 2, s, s);
           ctx.restore();
         } else {
@@ -169,9 +172,26 @@
 
       this.updateTopologyCache(state, compDisease, math, originX, originY, hexRadius);
 
-      const edges = this.cachedEdges;
-      const nodes = this.cachedNodes;
-      if (!edges || edges.length === 0 || !nodes || nodes.length === 0) return;
+      const lp = global.TurnLogPlayer;
+      const logActive = !!lp?.active;
+      const outAlpha = logActive ? Math.max(0, 1.0 - (lp.progress ?? 1.0)) : 0;
+      const outEdgesRaw = (outAlpha > 0.005 && lp?.fadeOutDiseaseEdges?.length) ? lp.fadeOutDiseaseEdges : [];
+      const outNodesRaw = (outAlpha > 0.005 && lp?.fadeOutDiseaseNodes?.length) ? lp.fadeOutDiseaseNodes : [];
+
+      const edges = this.cachedEdges ? this.cachedEdges.slice() : [];
+      const nodes = this.cachedNodes ? this.cachedNodes.slice() : [];
+      for (let i = 0; i < outEdgesRaw.length; i++) {
+        const oe = outEdgesRaw[i];
+        const p1 = math.hexToScreen(oe.q1, oe.r1, originX, originY, hexRadius);
+        const p2 = math.hexToScreen(oe.q2, oe.r2, originX, originY, hexRadius);
+        edges.push({ p1, p2, dx: p2.x - p1.x, dy: p2.y - p1.y, dirIndex: oe.dirIndex, q1: oe.q1, r1: oe.r1, q2: oe.q2, r2: oe.r2, _forcedAlpha: outAlpha });
+      }
+      for (let i = 0; i < outNodesRaw.length; i++) {
+        const on = outNodesRaw[i];
+        const pt = math.hexToScreen(on.q, on.r, originX, originY, hexRadius);
+        nodes.push({ x: pt.x, y: pt.y, q: on.q, r: on.r, _forcedAlpha: outAlpha });
+      }
+      if (edges.length === 0 && nodes.length === 0) return;
 
       const scale = hexRadius / 30;
 
@@ -186,13 +206,21 @@
         this.lastHexR = hexRadius;
       }
 
-      // Compute bounding box around the active disease network
-      let minX = nodes[0].x, maxX = nodes[0].x, minY = nodes[0].y, maxY = nodes[0].y;
-      for (let i = 1; i < nodes.length; i++) {
+      // Compute bounding box around the active disease network (safe even if nodes is empty)
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (let i = 0; i < nodes.length; i++) {
         const nx = nodes[i].x, ny = nodes[i].y;
-        if (nx < minX) minX = nx; else if (nx > maxX) maxX = nx;
-        if (ny < minY) minY = ny; else if (ny > maxY) maxY = ny;
+        if (nx < minX) minX = nx; if (nx > maxX) maxX = nx;
+        if (ny < minY) minY = ny; if (ny > maxY) maxY = ny;
       }
+      for (let i = 0; i < edges.length; i++) {
+        const e = edges[i];
+        if (e.p1.x < minX) minX = e.p1.x; if (e.p1.x > maxX) maxX = e.p1.x;
+        if (e.p2.x < minX) minX = e.p2.x; if (e.p2.x > maxX) maxX = e.p2.x;
+        if (e.p1.y < minY) minY = e.p1.y; if (e.p1.y > maxY) maxY = e.p1.y;
+        if (e.p2.y < minY) minY = e.p2.y; if (e.p2.y > maxY) maxY = e.p2.y;
+      }
+      if (!Number.isFinite(minX)) return;
       const pad = Math.ceil(36 * scale);
       const bx = Math.floor(minX - pad), by = Math.floor(minY - pad);
       const bw = Math.max(72, Math.ceil(maxX - minX + pad * 2));
@@ -205,7 +233,7 @@
         this.humDirty = true;
       }
 
-      const hasTileAnims = (global.BoardRippleRenderer?.activeTileAnims?.size || 0) > 0;
+      const hasTileAnims = (global.BoardRippleRenderer?.activeTileAnims?.size || 0) > 0 || logActive;
       const animsJustEnded = !hasTileAnims && this.lastHadTileAnims;
       this.lastHadTileAnims = hasTileAnims;
 
@@ -219,6 +247,10 @@
         const rippleRenderer = global.BoardRippleRenderer;
         for (let i = 0; i < edges.length; i++) {
           const e = edges[i];
+          if (e._forcedAlpha !== undefined) {
+            e._alpha = e._forcedAlpha;
+            continue;
+          }
           let alpha = 1.0;
           if (rippleRenderer?.getTileAnimState) {
             const a1 = rippleRenderer.getTileAnimState(e.q1, e.r1);
@@ -226,6 +258,10 @@
             const s1 = (a1 && a1.scale !== undefined) ? a1.scale : 1.0;
             const s2 = (a2 && a2.scale !== undefined) ? a2.scale : 1.0;
             alpha = Math.min(s1, s2);
+          }
+          if (logActive && lp?.getDiseaseEdgeAlpha) {
+            const k1 = `${e.q1},${e.r1}`, k2 = `${e.q2},${e.r2}`;
+            alpha *= lp.getDiseaseEdgeAlpha(k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`);
           }
           e._alpha = Math.max(0.0, Math.min(1.0, alpha));
         }

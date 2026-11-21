@@ -152,11 +152,10 @@
           (resolver?.isTransitionActive && resolver?.activatingSigilIds?.has(c.id))
         )
         : [];
-      if (!dormantCands || dormantCands.length === 0) return;
 
       const emblemRenderer = global.SigilEmblemRenderer;
 
-      dormantCands.forEach(cand => {
+      (dormantCands || []).forEach(cand => {
         if (global.BoardRippleRenderer?.isSigilDetonating?.(cand.id)) return;
         if (!cand.vertex && math.findVertexForTiles) cand.vertex = math.findVertexForTiles(cand.tiles);
         const v = cand.vertex;
@@ -196,7 +195,8 @@
           expAlpha *= burnAlpha;
           dormantScale *= burnAlpha;
         }
-        if (dormantScale <= 0.001) return;
+        expAlpha *= (global.TurnLogPlayer?.getDormantSigilAlpha?.(cand.id) ?? 1.0);
+        if (dormantScale <= 0.001 || expAlpha <= 0.001) return;
 
         const elemInfo = this._getElemInfo(cand.element);
         const isSelected = this._isVertexSelected(state, v);
@@ -212,6 +212,7 @@
           ctx.restore();
         }
       });
+      global.TurnLogPlayer?.renderOutgoingDormantSigils?.(ctx, math, originX, originY, hexRadius);
     }
   }
 

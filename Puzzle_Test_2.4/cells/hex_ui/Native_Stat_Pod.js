@@ -41,6 +41,8 @@
       this.statTypeNodes = {};
       this.statValNodes = {};
       this._scorePulse = { state: 'idle', scale: 1.0, lastMs: 0 };
+      this._statFades = {};
+      this._playerTurnMatched = null;
 
       // Configurable Parameters (Tuning Lab Controls)
       this.config = {
@@ -161,16 +163,32 @@
             ctx.font = `400 ${self.config.statTextSize}px ${fontSciFae}`;
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             const tY = (self.config.statTextY || 0) + 1.5;
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-            ctx.fillText(self.stats[def.key] ?? def.val, 0.5, tY + 0.5);
-            ctx.fillStyle = '#ffffff';
-            ctx.fillText(self.stats[def.key] ?? def.val, 0, tY);
+            const drawVal = (txt, alpha) => {
+              if (alpha <= 0.005) return;
+              ctx.save(); ctx.globalAlpha *= alpha;
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.65)'; ctx.fillText(txt, 0.5, tY + 0.5);
+              ctx.fillStyle = '#ffffff'; ctx.fillText(txt, 0, tY);
+              ctx.restore();
+            };
+            const fade = self._statFades?.[def.key];
+            if (fade) {
+              const lp = global.TurnLogPlayer;
+              const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+              const p = fade.logDriven
+                ? ((lp?.active && (lp.stage === 'TO_PRE' || lp.stage === 'TO_POST')) ? (lp.progress ?? 1.0) : 1.0)
+                : Math.max(0.0, Math.min(1.0, (now - fade.startMs) / Math.max(1, fade.durationMs)));
+              if (p < 1.0) { drawVal(fade.oldVal, 1.0 - p); drawVal(fade.newVal, p); }
+              else { delete self._statFades[def.key]; drawVal(self.stats[def.key] ?? def.val, 1.0); }
+            } else {
+              drawVal(self.stats[def.key] ?? def.val, 1.0);
+            }
             ctx.restore();
           }
         });
         self.topPodNode.addChild(valNode);
         self.statValNodes[def.key] = valNode;
       });
+      this.updatePlayerTurnHighlight();
 
       // Keep score value hex above neighbor borders when inflated during point arrivals
       if (this.statValNodes['score']) {
@@ -179,16 +197,34 @@
       }
 
       // Per-frame attack/release scale bounce on the score value hex (1/8 H-Beat up to 1.20x, 1 H-Beat down)
+      // plus timed cross-fade tick cleanup for non-log stat number transitions
       this.topPodNode.addTrait({
         name: 'score-pulse-anim',
         update() {
+          const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+          const fades = self._statFades;
+          if (fades) {
+            let hasActiveTimedFade = false;
+            for (const k of Object.keys(fades)) {
+              const f = fades[k];
+              if (!f) continue;
+              if (f.logDriven) {
+                const lp = global.TurnLogPlayer;
+                if (!lp?.active || (lp.stage !== 'TO_PRE' && lp.stage !== 'TO_POST') || (lp.progress ?? 1) >= 1) delete fades[k];
+              } else if ((now - f.startMs) >= f.durationMs) {
+                delete fades[k];
+              } else {
+                hasActiveTimedFade = true;
+              }
+            }
+            if (hasActiveTimedFade) global.BoardRenderer?.render?.();
+          }
           const p = self._scorePulse, vNode = self.statValNodes['score'];
           if (!p || !vNode) return;
           if (p.state === 'idle') {
             vNode.scale = 1.0;
             return;
           }
-          const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
           const dt = p.lastMs > 0 ? Math.min(0.1, Math.max(0, (now - p.lastMs) * 0.001)) : 0;
           p.lastMs = now;
           const h1Sec = global.H_TIMING?.BEAT_SEC ?? (Math.pow(12, 8) / 1420405751.768);
@@ -314,44 +350,53 @@
       if (this.topPodNode) this.topPodNode.updateTransforms(this.topPodNode.parent?.worldMatrix || this.engine?.root?.worldMatrix || null);
     }
 
-    updateHpCompLayout() {
-      if (global.NativeVitalityPod?.updateHpCompLayout) {
-        global.NativeVitalityPod.updateHpCompLayout();
-      }
+    updateHpCompLayout() { global.NativeVitalityPod?.updateHpCompLayout?.(); }
+    setHp(c, d, h) { global.NativeVitalityPod?.setHp?.(c, d, h); }
+    setPendingDamage(dmg) { global.NativeVitalityPod?.setPendingDamage?.(dmg); }
+    setPendingHeal(heal) { global.NativeVitalityPod?.setPendingHeal?.(heal); }
+    setComponents(bag) { global.NativeVitalityPod?.setComponents?.(bag); }
+
+    /** Highlights right pods of Player and Turn with standard double orange border when they match. */
+    updatePlayerTurnHighlight() {
+      const pNode = this.statValNodes?.['player'], tNode = this.statValNodes?.['turn'];
+      if (!pNode || !tNode) return;
+      const norm = v => String(v ?? '').replace(/^P/i, '').trim();
+      const isMatch = norm(this.stats.player) !== '' && norm(this.stats.player) === norm(this.stats.turn);
+      if (this._playerTurnMatched === isMatch) return;
+      this._playerTurnMatched = isMatch;
+      const style = isMatch
+        ? { bgColor: '#0f172a', bgOpacity: 1.0, innerHighlight: { enabled: true, color: '#ff9214', sharpEdgeColor: '#ff9214', spread: 8, intensity: 0.80, steps: 3 }, outerHighlight: { enabled: true, color: '#ff9214', sharpEdgeColor: '#ff9214', blur: 8, intensity: 0.80, steps: 3 } }
+        : { bgColor: '#0f172a', bgOpacity: 1.0, innerHighlight: { enabled: true, color: '#3d6eff', sharpEdgeColor: '#3d6eff', spread: 6, intensity: 0.65, lineWidth: 1.4 }, outerHighlight: { enabled: true, color: '#3d6eff', blur: 8, intensity: 0.35 } };
+      [pNode, tNode].forEach(n => { Object.assign(n.style, style); n.invalidateCache?.(); });
     }
 
-    setHp(current, pendingDamage, pendingHeal) {
-      if (global.NativeVitalityPod?.setHp) {
-        global.NativeVitalityPod.setHp(current, pendingDamage, pendingHeal);
+    _applyStatValue(normalizedKey, valStr, opts = {}) {
+      if (this.stats[normalizedKey] === undefined) return;
+      const prevStr = String(this.stats[normalizedKey] ?? '');
+      if (prevStr === valStr) return;
+      const lp = global.TurnLogPlayer;
+      const isLogFade = !!(lp?.active && (lp.stage === 'TO_PRE' || lp.stage === 'TO_POST'));
+      if (opts.immediate || !this.topPodNode?.visible) {
+        delete this._statFades[normalizedKey];
+      } else {
+        const durMs = global.H_TIMING?.THREE_BEATS_MS ?? (3000 * Math.pow(12, 8) / 1420405751.768);
+        this._statFades[normalizedKey] = { oldVal: prevStr, newVal: valStr, startMs: (typeof performance !== 'undefined' ? performance.now() : Date.now()), durationMs: durMs, logDriven: isLogFade };
       }
-    }
-    setPendingDamage(dmg) {
-      if (global.NativeVitalityPod?.setPendingDamage) {
-        global.NativeVitalityPod.setPendingDamage(dmg);
-      }
-    }
-    setPendingHeal(heal) {
-      if (global.NativeVitalityPod?.setPendingHeal) {
-        global.NativeVitalityPod.setPendingHeal(heal);
-      }
-    }
-    setComponents(bag) {
-      if (global.NativeVitalityPod?.setComponents) {
-        global.NativeVitalityPod.setComponents(bag);
-      }
+      this.stats[normalizedKey] = valStr;
     }
 
-    setStat(key, val) {
+    setStat(key, val, opts = {}) {
       const normalizedKey = (key === 'average') ? 'ave' : ((key === 'combo') ? 'points' : key);
-      if (this.stats[normalizedKey] !== undefined) {
-        this.stats[normalizedKey] = val.toString();
-        this.updateStatsLayout();
-      }
+      if (this.stats[normalizedKey] === undefined) return;
+      this._applyStatValue(normalizedKey, val.toString(), opts);
+      this.updatePlayerTurnHighlight();
+      this.updateStatsLayout();
     }
-    setStats(updates = {}) {
+    setStats(updates = {}, opts = {}) {
       if (updates.average !== undefined && updates.ave === undefined) updates.ave = updates.average;
       if (updates.combo !== undefined && updates.points === undefined) updates.points = updates.combo;
-      Object.assign(this.stats, updates);
+      Object.keys(updates).forEach(k => { if (updates[k] !== undefined) this._applyStatValue(k, updates[k].toString(), opts); });
+      this.updatePlayerTurnHighlight();
       this.updateStatsLayout();
     }
 
@@ -398,11 +443,11 @@
       const g = global.GameState;
       if (g && pts > 0) {
         g.score = Number(g.score || 0) + pts;
-        this.setStat('score', g.score);
+        this.setStat('score', g.score, { immediate: true });
         if (g.round > 0) {
           const rawAve = g.score / g.round;
           const ave = rawAve >= 100 ? Math.round(rawAve) : Number(rawAve.toFixed(rawAve >= 10 ? 1 : 2));
-          this.setStat('ave', ave);
+          this.setStat('ave', ave, { immediate: true });
         }
       }
       this.triggerScoreBounce();

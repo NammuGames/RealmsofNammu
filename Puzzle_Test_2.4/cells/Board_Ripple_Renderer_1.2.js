@@ -18,6 +18,7 @@
   const H_HALF_MS = global.H_TIMING?.HALF_BEAT_MS ?? (H1_MS * 0.5);
   const H3_SEC = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * H1_SEC);
   const H3_MS = global.H_TIMING?.THREE_BEATS_MS ?? (3 * H1_MS);
+  const H4_SEC = global.H_TIMING?.FOUR_BEATS_SEC ?? (4 * H1_SEC);
   const DRIFT_SPEED = global.H_TIMING?.DRIFT_PX_PER_SEC ?? (144 / H1_SEC);
 
   proto._getDiseaseAnims = function() {
@@ -32,8 +33,8 @@
    * 3. 1 H-Beat before end, placement ripple bursts across board tokens with bands = boardTokens.length.
    * 4. Pre-placed token persists on board in persistentPreTokens.
    */
-  proto.playDiseaseDestructionAnimation = function(entry, onComplete, durationSec = H3_SEC) {
-    const dur = durationSec || H3_SEC, rippleStartT = Math.max(0, 1 - H1_SEC / dur);
+  proto.playDiseaseDestructionAnimation = function(entry, onComplete, durationSec = H4_SEC) {
+    const dur = durationSec || H4_SEC, rippleStartT = Math.max(0, 1 - H1_SEC / dur);
     const boardTokens = (entry.shape?.components && entry.shape.components.length > 0)
       ? entry.shape.components.map(c => ({ q: c.q, r: c.r })) : [{ q: entry.q, r: entry.r }];
     const bands = boardTokens.length, preColor = entry.type === 'burn' ? '#ef4444' : '#2563eb';

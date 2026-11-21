@@ -28,60 +28,78 @@
     global.UndoManager?.clearTurnHistory?.();
     global.TurnLogManager?.capturePostEndSnapshot?.();
 
-    // Replenish queue, advance active player in roster, and increment round when wrapping to Player 1
-    if (global.MatchOrchestrator?.advanceTurnAndRound) {
-      const res = global.MatchOrchestrator.advanceTurnAndRound(state);
-      if (res.matchEnded) {
-        if (!state.isMatchEnding) this.isEndingTurn = false;
-        this.isStartingTurn = false;
-        state.turnPhase = 'MID_TURN';
-        global.TurnLogManager?.finishLocalEndTurn?.({ nextPlayerIndex: state.activePlayerIndex, nextRound: state.round });
-        global.NetworkP2PManager?.onTurnAdvancementComplete?.();
+    const finalizeAdvancement = () => {
+      if (!state.matchStarted && !state.gameOver) return;
+
+      // Replenish queue, advance active player in roster, and increment round when wrapping to Player 1
+      if (global.MatchOrchestrator?.advanceTurnAndRound) {
+        const res = global.MatchOrchestrator.advanceTurnAndRound(state);
+        if (res.matchEnded) {
+          if (!state.isMatchEnding) this.isEndingTurn = false;
+          this.isStartingTurn = false;
+          state.turnPhase = 'MID_TURN';
+          global.TurnLogManager?.finishLocalEndTurn?.({ nextPlayerIndex: state.activePlayerIndex, nextRound: state.round });
+          global.NetworkP2PManager?.onTurnAdvancementComplete?.();
+          state.syncUI();
+          global.BoardRenderer?.render?.();
+          return;
+        }
+      } else {
+        state.round++;
+        state.refillTray();
+      }
+
+      global.TurnLogManager?.finishLocalEndTurn?.({ nextPlayerIndex: state.activePlayerIndex, nextRound: state.round });
+
+      // Lock mid-turn inputs at settled Post-End state until the active player runs startPlayerTurn()
+      this.isEndingTurn = false;
+      state.turnPhase = 'START_TURN';
+      state.placedThisTurn = true;
+      state.isMaterialSelected = false;
+      state.selectedTrayIndex = 0;
+      state.selectedRotation = 0;
+      state.upDownAxisState = 0;
+      state.placementCursor = { q: 0, r: 0 };
+      state.inSigilStage = false;
+      state.activeMaterialMod = null;
+      state.roundBonusPoints = 0;
+      state.pendingHeal = 0;
+
+      // Retain un-resonated Arch pseudo-sigil zones on the board until they resonate
+      if (global.SpellArch) { global.SpellArch.isPlaced = false; global.SpellArch.placedCenter = null; global.SpellArch.inArchMode = false; }
+      global.SpellWeave?.reset?.();
+
+      const net = global.NetworkP2PManager;
+      const isOnline = !!net?.isConnected?.();
+      const isLocalTurnNow = !isOnline || net.isLocalPlayersTurn();
+
+      if (!isLocalTurnNow) {
+        // Outgoing player stops at their settled Post-End board; incoming player runs Start-Turn on their device
+        net.onTurnAdvancementComplete?.();
         state.syncUI();
+        global.UICardsDeck?.syncMaterialsQueueColumn?.();
+        global.UICardsDeck?.syncSpellbookColumn?.();
         global.BoardRenderer?.render?.();
         return;
       }
-    } else {
-      state.round++;
-      state.refillTray();
-    }
 
-    global.TurnLogManager?.finishLocalEndTurn?.({ nextPlayerIndex: state.activePlayerIndex, nextRound: state.round });
+      // Local / same-device multi-seat: immediately run this player's Start-Turn phase
+      this.startPlayerTurn();
+    };
 
-    // Lock mid-turn inputs at settled Post-End state until the active player runs startPlayerTurn()
-    this.isEndingTurn = false;
-    state.turnPhase = 'START_TURN';
-    state.placedThisTurn = true;
-    state.isMaterialSelected = false;
-    state.selectedTrayIndex = 0;
-    state.selectedRotation = 0;
-    state.upDownAxisState = 0;
-    state.placementCursor = { q: 0, r: 0 };
-    state.inSigilStage = false;
-    state.activeMaterialMod = null;
-    state.roundBonusPoints = 0;
-    state.pendingHeal = 0;
-
-    // Retain un-resonated Arch pseudo-sigil zones on the board until they resonate
-    if (global.SpellArch) { global.SpellArch.isPlaced = false; global.SpellArch.placedCenter = null; global.SpellArch.inArchMode = false; }
-    global.SpellWeave?.reset?.();
-
-    const net = global.NetworkP2PManager;
-    const isOnline = !!net?.isConnected?.();
-    const isLocalTurnNow = !isOnline || net.isLocalPlayersTurn();
-
-    if (!isLocalTurnNow) {
-      // Outgoing player stops at their settled Post-End board; incoming player runs Start-Turn on their device
-      net.onTurnAdvancementComplete?.();
+    const isMultiplayer = (state.players?.length || 1) > 1;
+    if (isMultiplayer && state.matchStarted && !state.gameOver && !state.isMatchEnding) {
+      this.isEndingTurn = true;
+      state.placedThisTurn = true;
+      state.isMaterialSelected = false;
       state.syncUI();
-      global.UICardsDeck?.syncMaterialsQueueColumn?.();
-      global.UICardsDeck?.syncSpellbookColumn?.();
       global.BoardRenderer?.render?.();
+      const h3Ms = global.H_TIMING?.THREE_BEATS_MS ?? (3000 * Math.pow(12, 8) / 1420405751.768);
+      setTimeout(finalizeAdvancement, Math.round(h3Ms));
       return;
     }
 
-    // Local / same-device multi-seat: immediately run this player's Start-Turn phase
-    this.startPlayerTurn();
+    finalizeAdvancement();
   };
 
   /**

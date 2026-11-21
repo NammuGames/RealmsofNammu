@@ -240,7 +240,7 @@
           };
 
           if (global.BoardRippleRenderer?.playDiseaseDestructionAnimation) {
-            global.BoardRippleRenderer.playDiseaseDestructionAnimation(entry, onBodyDestroyed, h3Sec);
+            global.BoardRippleRenderer.playDiseaseDestructionAnimation(entry, onBodyDestroyed, 4 * h1Sec);
           } else {
             onBodyDestroyed();
           }

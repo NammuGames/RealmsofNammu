@@ -40,7 +40,7 @@
 
         const start = Number(item.turnStart ?? 1);
         const interval = Math.max(1, Number(item.turnInterval || 1));
-        const baseEnd = item.isEndOfMatch ? numericMax : Number(item.turnEnd ?? 24);
+        const duration = Math.max(1, Number(item.turnEnd ?? 24));
         const dup = Math.max(0, Number(item.dupInterval || 0));
         const spawnCount = Math.max(1, Math.min(24, Number(item.spawnCount ?? 1) || 1));
 
@@ -50,7 +50,7 @@
           const sStart = start + offset;
           if (sStart > round) break;
 
-          const sEnd = item.isEndOfMatch ? numericMax : (baseEnd + offset);
+          const sEnd = item.isEndOfMatch ? numericMax : (sStart + duration - 1);
           if (round >= sStart && round <= sEnd && ((round - sStart) % interval === 0)) {
             for (let s = 0; s < spawnCount; s++) {
               chances.push(chance);

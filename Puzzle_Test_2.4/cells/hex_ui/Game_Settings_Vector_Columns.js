@@ -134,7 +134,7 @@
         }
       },
       {
-        type: 'full_stepper', id: 'turn-start', title: 'R Start', valText: `Start: ${item.turnStart} R`,
+        type: 'full_stepper', id: 'turn-start', title: 'R Start', valText: `Start: R ${item.turnStart}`,
         isCenterGhost: isZeroChance,
         onDelta: (d) => { item.turnStart = Math.max(0, Math.min(432, (item.turnStart || 0) + d)); self.buildScene(); }
       },
@@ -144,11 +144,11 @@
         onDelta: (d) => { item.turnInterval = Math.max(1, Math.min(144, (item.turnInterval || 1) + d)); self.buildScene(); }
       },
       {
-        type: 'full_stepper', id: 'turn-end', title: 'R End',
-        valText: item.isEndOfMatch ? 'End of Match' : `Cease: ${item.turnEnd} R`,
+        type: 'full_stepper', id: 'turn-end', title: 'Lasts',
+        valText: item.isEndOfMatch ? 'End of Match' : `Lasts: ${Math.max(1, item.turnEnd ?? 1)} R`,
         isCenterClickable: true, isLocked: !!item.isEndOfMatch, isCenterGhost: isZeroChance,
         onCenterClick: () => { item.isEndOfMatch = !item.isEndOfMatch; self.buildScene(); },
-        onDelta: (d) => { item.isEndOfMatch = false; item.turnEnd = Math.max(0, Math.min(432, (item.turnEnd || 0) + d)); self.buildScene(); }
+        onDelta: (d) => { item.isEndOfMatch = false; item.turnEnd = Math.max(1, Math.min(432, (item.turnEnd || 1) + d)); self.buildScene(); }
       },
       {
         type: 'full_stepper', id: 'spawn-count', title: 'Spawns',

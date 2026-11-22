@@ -317,7 +317,7 @@
   Proto.getTileCountForRadius = function(r) { return 1 + 3 * r * (r + 1); };
 
   Proto.createDuplicate = function(item, turn) {
-    return { ...item, id: `${item.id}_dup_${turn}`, name: `${item.name} (T${turn})`, turnStart: (item.turnStart || 0) + turn, turnEnd: (item.turnEnd || 0) + turn };
+    return { ...item, id: `${item.id}_dup_${turn}`, name: `${item.name} (T${turn})`, turnStart: (item.turnStart || 0) + turn };
   };
 
   Proto.launchMatch = function() {

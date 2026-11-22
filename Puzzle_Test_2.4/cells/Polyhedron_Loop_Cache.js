@@ -21,8 +21,8 @@
         Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560
       );
       this.duration = 6.0;      // 6.0 seconds per seamless harmonic cycle
-      this.frameCount = isMobile ? 360 : 720;    // Mobile: 360 frames (20x18) at 64px cuts VRAM/bandwidth by ~78%
-      this.cols = isMobile ? 20 : 30;
+      this.frameCount = 720;    // 720 frames (30x24) = 120 fps native capture rate (supports 0.1x ultra-slow tumble)
+      this.cols = 30;
       this.frameSize = isMobile ? 64 : 96;
       this.baseRadius = isMobile ? (46.0 * (64 / 96)) : 46.0;
       this.enabled = true;

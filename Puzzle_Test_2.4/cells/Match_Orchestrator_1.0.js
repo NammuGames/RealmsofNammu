@@ -28,9 +28,9 @@
      * @param {boolean} isEndless
      * @returns {Array<number>}
      */
-    evaluateVectorForRound(items, round, maxRounds = 12, isEndless = false) {
+    evaluateVectorForRound(items, round, maxRounds = 12, isEndless = false, asMaterialEntries = false) {
       if (!Array.isArray(items) || round < 0) return [];
-      const chances = [];
+      const out = [];
       const numericMax = (isEndless || maxRounds === '∞') ? Infinity : (Number(maxRounds) || 432);
 
       for (const item of items) {
@@ -42,7 +42,8 @@
         const interval = Math.max(1, Number(item.turnInterval || 1));
         const duration = Math.max(1, Number(item.turnEnd ?? 24));
         const dup = Math.max(0, Number(item.dupInterval || 0));
-        const spawnCount = Math.max(1, Math.min(24, Number(item.spawnCount ?? 1) || 1));
+        const maxCap = asMaterialEntries ? 4 : 24;
+        const spawnCount = Math.max(1, Math.min(maxCap, Number(item.spawnCount ?? 1) || 1));
 
         // k = 0 is the original series; k = 1, 2, ... are linear shifted duplicate series
         for (let k = 0; ; k++) {
@@ -52,15 +53,17 @@
 
           const sEnd = item.isEndOfMatch ? numericMax : (sStart + duration - 1);
           if (round >= sStart && round <= sEnd && ((round - sStart) % interval === 0)) {
-            for (let s = 0; s < spawnCount; s++) {
-              chances.push(chance);
+            if (asMaterialEntries) {
+              out.push({ pct: chance, pickCount: spawnCount });
+            } else {
+              for (let s = 0; s < spawnCount; s++) out.push(chance);
             }
           }
 
           if (dup === 0) break;
         }
       }
-      return chances;
+      return out;
     }
 
     /** Builds and caches the Round Schedule for fast O(1) lookup per round. */
@@ -82,10 +85,10 @@
       const luckP = cfg.luckPreset || {}, blightP = cfg.blightPreset || {};
 
       const entry = {
-        playfieldLuck: this.evaluateVectorForRound(luckP.playfieldItems, round, maxRounds, isEndless),
-        materialLuck: this.evaluateVectorForRound(luckP.materialItems, round, maxRounds, isEndless),
-        playfieldBlight: this.evaluateVectorForRound(blightP.playfieldItems, round, maxRounds, isEndless),
-        materialBlight: this.evaluateVectorForRound(blightP.materialItems, round, maxRounds, isEndless)
+        playfieldLuck: this.evaluateVectorForRound(luckP.playfieldItems, round, maxRounds, isEndless, false),
+        materialLuck: this.evaluateVectorForRound(luckP.materialItems, round, maxRounds, isEndless, true),
+        playfieldBlight: this.evaluateVectorForRound(blightP.playfieldItems, round, maxRounds, isEndless, false),
+        materialBlight: this.evaluateVectorForRound(blightP.materialItems, round, maxRounds, isEndless, true)
       };
       this.scheduleCache.set(round, entry);
       return entry;
@@ -136,22 +139,36 @@
         : (state.round ?? 1);
       const sched = this.getRoundScheduleEntry(state, targetRound);
 
-      // 2. Per-Component Spawning: Luck rolls first, Disease rolls second (cannot overwrite Luck)
-      for (let i = 0; i < 4; i++) {
-        let luckReplaced = false;
-        for (const pct of sched.materialLuck) {
-          if (Math.random() * 100 < pct) {
-            colors[i] = this.pickLuckComponent(cfg);
-            luckReplaced = true;
-            break;
+      // 2. Per-Component Spawning: each entry picks `pickCount` (1-4) distinct components at random;
+      // Luck rolls first, Disease rolls second (cannot overwrite Luck).
+      const pickRandomIndices = (count) => {
+        const idxPool = [0, 1, 2, 3];
+        const k = Math.max(1, Math.min(4, count || 4));
+        if (k === 4) return idxPool;
+        for (let i = idxPool.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const tmp = idxPool[i]; idxPool[i] = idxPool[j]; idxPool[j] = tmp;
+        }
+        return idxPool.slice(0, k);
+      };
+
+      const luckIndices = new Set();
+      for (const spec of sched.materialLuck) {
+        const pct = typeof spec === 'object' ? spec.pct : spec;
+        const pickCount = typeof spec === 'object' ? spec.pickCount : 4;
+        for (const i of pickRandomIndices(pickCount)) {
+          if (!luckIndices.has(i) && Math.random() * 100 < pct) {
+            colors[i] = 'ether';
+            luckIndices.add(i);
           }
         }
-        if (!luckReplaced) {
-          for (const pct of sched.materialBlight) {
-            if (Math.random() * 100 < pct) {
-              colors[i] = 'disease';
-              break;
-            }
+      }
+      for (const spec of sched.materialBlight) {
+        const pct = typeof spec === 'object' ? spec.pct : spec;
+        const pickCount = typeof spec === 'object' ? spec.pickCount : 4;
+        for (const i of pickRandomIndices(pickCount)) {
+          if (!luckIndices.has(i) && colors[i] !== 'disease' && Math.random() * 100 < pct) {
+            colors[i] = 'disease';
           }
         }
       }

@@ -150,8 +150,6 @@
       <button class="drawer-tab-btn" data-tab="tab-warp-halo">🌀 Warp</button>
       <button class="drawer-tab-btn" data-tab="tab-audio-mix">🔊 Audio</button>
       <button class="drawer-tab-btn" data-tab="tab-board-edit">🛠️ Edit</button>
-      <button class="drawer-tab-btn" data-tab="tab-match-start">✨ Spawn</button>
-      <button class="drawer-tab-btn" data-tab="tab-p2p-online">🌐 P2P</button>
     </div>
 
     <div id="tab-game-defaults" class="drawer-tab-pane active">
@@ -340,47 +338,6 @@
         </div>
       </div>
     </div>
-
-    <div id="tab-match-start" class="drawer-tab-pane">
-      <div class="control-group">
-        <div class="group-title">✨ Match Start Spawn</div>
-        <p style="font-size: 11px; color: #94a3b8; margin: 0 0 10px 0; line-height: 1.4;">
-          Ring-by-ring board spawn timing in increments of 1/12 H-Beat (0 → +20% → 1.0).
-        </p>
-        <div class="slider-row" style="margin-top: 6px;">
-          <div class="slider-header"><span class="slider-label">Tile Spawn Speed</span><span id="val-match-tile-twelfths" class="slider-val">36/12 HB (3.00 • 908 ms)</span></div>
-          <input type="range" id="slider-match-tile-twelfths" min="1" max="144" step="1" value="36">
-        </div>
-        <div class="slider-row" style="margin-top: 6px;">
-          <div class="slider-header"><span class="slider-label">Ring Spacing</span><span id="val-match-ring-twelfths" class="slider-val">6/12 HB (0.50 • 151 ms)</span></div>
-          <input type="range" id="slider-match-ring-twelfths" min="0" max="36" step="1" value="6">
-        </div>
-        <div style="margin-top: 14px;">
-          <button id="btn-copy-match-start-config" class="btn-action-primary" style="margin-top: 0; width: 100%; justify-content: center;">
-            📋 Copy Spawn Config (JSON)
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div id="tab-p2p-online" class="drawer-tab-pane">
-      <div class="control-group">
-        <div class="group-title">🌐 Serverless Relay (WSS)</div>
-        <div id="p2p-status-box" style="font-family: monospace; font-size: 11px; line-height: 1.5; padding: 8px; border-radius: 6px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(56, 189, 248, 0.25); color: #38bdf8; white-space: pre-wrap; margin-bottom: 10px;">Status: Offline (Local Mode)</div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
-          <button id="btn-p2p-host" class="btn-action-primary" style="margin-top: 0; justify-content: center;">🌐 Host Room</button>
-          <button id="btn-p2p-host-saved" class="btn-action-secondary" style="margin-top: 0; justify-content: center;">💾 Host Saved</button>
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-bottom: 8px;">
-          <input id="input-p2p-room-code" type="text" maxlength="8" placeholder="ROOM CODE" style="background: rgba(0,0,0,0.45); border: 1px solid rgba(56,189,248,0.3); border-radius: 6px; color: #ffffff; padding: 6px 8px; font-family: monospace; text-transform: uppercase;">
-          <button id="btn-p2p-join" class="btn-action-primary" style="margin-top: 0;">Join</button>
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-          <button id="btn-p2p-pass-host" class="btn-action-secondary" style="margin-top: 0;">👑 Pass Host</button>
-          <button id="btn-p2p-leave" class="btn-action-secondary" style="margin-top: 0;">🔌 Leave</button>
-        </div>
-      </div>
-    </div>
   </aside>
 
   <!-- ====================================================================== -->
@@ -440,7 +397,7 @@
         panX: 0, panY: 0, targetPanX: 0, targetPanY: 0, zoom: 1.0, targetZoom: 1.0,
         zoomBaseScale: 0.66, zoomClosestTile: 1.50, zoomOutBuffer: 0.20,
         isDraggingBoard: false, lastMouseX: 0, lastMouseY: 0,
-        sidebarBtnCount: 6, btnHeight: 124, btnW1: 124, btnW2: 200, btnSpacing: 12,
+        sidebarBtnCount: 6, btnHeight: 124, btnW1: 124, btnW2: 200, btnSpacing: 12, sidebarBtnScale: 1.09,
         sidebarBtnFontSize: 32, sidebarBtnLineSpacing: 36, hotkeyX: 42, hotkeyY: 48,
         spellEmblemSize: 44, spellSlotSize: 18, spellSpacing: 77, spellGroupX: 12, polySpinSpeed: 0.1,
         tokenScale: 0.88, etherPolySize: 0.42, etherPolyDist: 0.48,

@@ -143,7 +143,6 @@
       <button class="drawer-tab-btn" data-tab="tab-warp-halo">🌀 Warp</button>
       <button class="drawer-tab-btn" data-tab="tab-audio-mix">🔊 Audio</button>
       <button class="drawer-tab-btn" data-tab="tab-board-edit">🛠️ Edit</button>
-      <button class="drawer-tab-btn" data-tab="tab-match-start">✨ Spawn</button>
     </div>
 
     <!-- TAB 1: GAME MENU DEFAULTS -->
@@ -483,38 +482,6 @@
         </div>
       </div>
     </div>
-
-    <!-- TAB 8: MATCH START SPAWN ANIMATION LAB -->
-    <div id="tab-match-start" class="drawer-tab-pane">
-      <div class="control-group">
-        <div class="group-title">✨ Match Start Spawn</div>
-        <p style="font-size: 11px; color: #94a3b8; margin: 0 0 10px 0; line-height: 1.4;">
-          Ring-by-ring board spawn timing in increments of 1/12 H-Beat (0 → +20% → 1.0).
-        </p>
-
-        <div class="slider-row" style="margin-top: 6px;">
-          <div class="slider-header">
-            <span class="slider-label">Tile Spawn Speed</span>
-            <span id="val-match-tile-twelfths" class="slider-val">36/12 HB (3.00 • 908 ms)</span>
-          </div>
-          <input type="range" id="slider-match-tile-twelfths" min="1" max="144" step="1" value="36">
-        </div>
-
-        <div class="slider-row" style="margin-top: 6px;">
-          <div class="slider-header">
-            <span class="slider-label">Ring Spacing</span>
-            <span id="val-match-ring-twelfths" class="slider-val">6/12 HB (0.50 • 151 ms)</span>
-          </div>
-          <input type="range" id="slider-match-ring-twelfths" min="0" max="36" step="1" value="6">
-        </div>
-
-        <div style="margin-top: 14px;">
-          <button id="btn-copy-match-start-config" class="btn-action-primary" style="margin-top: 0; width: 100%; justify-content: center;" title="Copy Match Start Spawn Configuration as JSON to Clipboard">
-            📋 Copy Spawn Config (JSON)
-          </button>
-        </div>
-      </div>
-    </div>
   </aside>
 
   <!-- ====================================================================== -->
@@ -662,7 +629,6 @@
   <script src="cells/Tween_Orchestrator.js"></script>
   <script src="cells/hex_ui/Warp_Halo_Tuning_Lab.js"></script>
   <script src="cells/hex_ui/Audio_Tuning_Lab.js"></script>
-  <script src="cells/hex_ui/Match_Start_Tuning_Lab.js"></script>
   <script src="cells/hex_ui/Tuning_Drawer_Lab.js"></script>
   <script src="cells/hex_ui/Board_Edit_Lab.js"></script>
   <script src="cells/hex_ui/Board_Edit_Ops.js"></script>
@@ -744,6 +710,7 @@
         btnW1: 124,
         btnW2: 200,
         btnSpacing: 12,
+        sidebarBtnScale: 1.09,
         sidebarBtnFontSize: 32,
         sidebarBtnLineSpacing: 36,
         hotkeyX: 42,

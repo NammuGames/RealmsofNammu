@@ -75,15 +75,16 @@
         this.activePresetDraft = null;
       }
       const parentEntry = this.history[this.history.length - 1];
+      this._nextScroll = parentEntry?.scroll || 0;
+      this._nextTargetScroll = parentEntry?.targetScroll || 0;
       if (parentEntry?.frame) {
         parentEntry.frame.visible = true;
         parentEntry.frame.scale = 1.0;
         parentEntry.frame.contentAlpha = shouldSkip ? 0.0 : 1.0;
         parentEntry.frame.position.x = 0;
         parentEntry.frame.position.y = 0;
+        this.buildScene(parentEntry.frame);
       }
-      this._nextScroll = parentEntry?.scroll || 0;
-      this._nextTargetScroll = parentEntry?.targetScroll || 0;
 
       if (!shouldSkip && global.TweenOrchestrator?.collapseFrame && closingEntry?.frame?.visible) {
         global.TweenOrchestrator.collapseFrame(closingEntry.frame, closingEntry.originPos, {

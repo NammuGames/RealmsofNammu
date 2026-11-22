@@ -161,10 +161,9 @@
 
     /**
      * Resizes frames dynamically to fit screen dimensions.
-     * Consumes the Single Source of Truth baseline (window.NAMMU_UI_BASELINE: 1920x945):
+     * Consumes the Single Source of Truth baseline (window.NAMMU_UI_BASELINE: 1920x960):
      * Sidebars: 240px, Gaps: 5px, Board Min Width: 1430px, Scroll Gap: 32px, Apex: 32px.
-     * Center board widens like an unrolling scroll on wider screens.
-     * Uniformly scales down on smaller/narrower screens maintaining exact proportions.
+     * Uniformly scales on screens maintaining exact locked proportions.
      */
     resize(width, height) {
       this.viewWidth = width;
@@ -174,14 +173,14 @@
 
       const base = global.NAMMU_UI_BASELINE || {};
       const BASE_W = base.width ?? 1920;
-      const BASE_H = base.height ?? 945;
+      const BASE_H = base.height ?? 960;
       const BASE_SIDEBAR_W = base.sidebarWidth ?? 240;
       const BASE_GAP = base.gapX ?? 5;
       const BASE_MIN_BOARD_W = base.minBoardWidth ?? 1430;
       const BASE_APEX_H = base.apexHeight ?? 32;
       const BASE_SCROLL_GAP_Y = base.scrollGapY ?? 32;
 
-      // Locked at 1.0 whenever viewport meets or exceeds the calibrated 1920x945 baseline.
+      // Locked at 1.0 whenever viewport meets or exceeds the calibrated 1920x960 baseline.
       const hudScale = Math.min(1.0, width / BASE_W, height / BASE_H);
       this.hudScale = hudScale;
 

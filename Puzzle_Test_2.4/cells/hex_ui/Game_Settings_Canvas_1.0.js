@@ -39,8 +39,8 @@
             match: { materialComposition: 'Even', luckComposition: 'Ether', startingSpells: 3, rounds: 144, boardRadius: 6, isEndless: false },
             luck: {
               activePlayfieldIndex: 0, activeMaterialIndex: 0,
-              playfieldItems: [{ id: 'pl1', name: 'Boon', turnStart: 0, turnInterval: 3, turnEnd: 24, spawnCount: 1, chance: 100, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }],
-              materialItems: [{ id: 'ml1', name: 'Gifts', turnStart: 1, turnInterval: 1, turnEnd: 24, spawnCount: 1, chance: 4, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }]
+              playfieldItems: [{ id: 'pl1', name: 'Boon', turnStart: 3, turnInterval: 3, turnEnd: 24, spawnCount: 1, chance: 100, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }],
+              materialItems: [{ id: 'ml1', name: 'Gifts', turnStart: 0, turnInterval: 1, turnEnd: 24, spawnCount: 4, chance: 6, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }]
             },
             blight: {
               activePlayfieldIndex: 0, activeMaterialIndex: 0,
@@ -56,13 +56,16 @@
             match: { materialComposition: 'Random', luckComposition: 'Random', startingSpells: 1, rounds: 144, boardRadius: 7, isEndless: false },
             luck: {
               activePlayfieldIndex: 0, activeMaterialIndex: 0,
-              playfieldItems: [{ id: 'pl1', name: 'Boon', turnStart: 0, turnInterval: 3, turnEnd: 24, spawnCount: 1, chance: 100, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }],
-              materialItems: [{ id: 'ml1', name: 'Gifts', turnStart: 1, turnInterval: 1, turnEnd: 24, spawnCount: 1, chance: 4, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }]
+              playfieldItems: [{ id: 'pl1', name: 'Boon', turnStart: 3, turnInterval: 3, turnEnd: 24, spawnCount: 1, chance: 100, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }],
+              materialItems: [{ id: 'ml1', name: 'Gifts', turnStart: 1, turnInterval: 1, turnEnd: 24, spawnCount: 2, chance: 12, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }]
             },
             blight: {
               activePlayfieldIndex: 0, activeMaterialIndex: 0,
-              playfieldItems: [{ id: 'ps1', name: 'Enemies', turnStart: 3, turnInterval: 1, turnEnd: 24, spawnCount: 1, chance: 18, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }],
-              materialItems: [{ id: 'ms1', name: 'Contamination', turnStart: 1, turnInterval: 1, turnEnd: 24, spawnCount: 1, chance: 4, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }]
+              playfieldItems: [
+                { id: 'ps1', name: 'Enemies', turnStart: 3, turnInterval: 1, turnEnd: 24, spawnCount: 1, chance: 18, dupInterval: 0, tagNumber: '001', isEndOfMatch: true },
+                { id: 'str_1795317067878', name: 'Waves', turnStart: 12, turnInterval: 12, turnEnd: 24, spawnCount: 3, chance: 100, dupInterval: 0, tagNumber: '002', isEndOfMatch: true }
+              ],
+              materialItems: [{ id: 'ms1', name: 'Contamination', turnStart: 1, turnInterval: 1, turnEnd: 24, spawnCount: 4, chance: 6, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }]
             }
           },
           {
@@ -78,8 +81,12 @@
             },
             blight: {
               activePlayfieldIndex: 0, activeMaterialIndex: 0,
-              playfieldItems: [{ id: 'ps1', name: 'Enemies', turnStart: 3, turnInterval: 1, turnEnd: 24, spawnCount: 1, chance: 6, dupInterval: 12, tagNumber: '001', isEndOfMatch: true }],
-              materialItems: [{ id: 'ms1', name: 'Contamination', turnStart: 1, turnInterval: 1, turnEnd: 24, spawnCount: 1, chance: 4, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }]
+              playfieldItems: [
+                { id: 'ps1', name: 'Enemies', turnStart: 1, turnInterval: 1, turnEnd: 24, spawnCount: 1, chance: 12, dupInterval: 12, tagNumber: '001', isEndOfMatch: true },
+                { id: 'str_1795320308170', name: 'Waves', turnStart: 12, turnInterval: 12, turnEnd: 24, spawnCount: 3, chance: 100, dupInterval: 12, tagNumber: '002', isEndOfMatch: true },
+                { id: 'str_1795317446093', name: 'Hord', turnStart: 1, turnInterval: 1, turnEnd: 1, spawnCount: 6, chance: 100, dupInterval: 0, tagNumber: '003', isEndOfMatch: false }
+              ],
+              materialItems: [{ id: 'ms1', name: 'Contamination', turnStart: 1, turnInterval: 1, turnEnd: 24, spawnCount: 4, chance: 6, dupInterval: 0, tagNumber: '001', isEndOfMatch: true }]
             }
           }
         ]

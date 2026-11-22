@@ -31,7 +31,6 @@
       this.initBordersTab();
       if (global.WarpHaloTuningLab) global.WarpHaloTuningLab.init(this.dom, this.audio);
       if (global.AudioTuningLab) global.AudioTuningLab.init(this.dom, this.audio);
-      if (global.MatchStartTuningLab) global.MatchStartTuningLab.init(this.dom, this.audio);
       this.initKeyboardShortcuts();
     }
 
@@ -147,22 +146,129 @@
 
 
 
+    _copyTextWithFeedback(text, btn, toastMsg) {
+      const markCopied = () => {
+        if (btn) {
+          const orig = btn.dataset.origLabel || btn.textContent;
+          btn.dataset.origLabel = orig;
+          btn.textContent = '✓ Copied!';
+          setTimeout(() => { btn.textContent = orig; }, 1500);
+        }
+        if (toastMsg && global.GameState?.showToast) global.GameState.showToast(toastMsg);
+      };
+      const fallbackCopy = () => {
+        let copied = false;
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+          document.body.appendChild(ta);
+          ta.select();
+          copied = !!document.execCommand?.('copy');
+          ta.remove();
+        } catch (_) {}
+        console.log('[TuningDrawerLab Export]\n' + text);
+        if (copied) markCopied();
+        else if (global.GameState?.showToast) global.GameState.showToast('⚠️ Clipboard blocked — JSON logged to DevTools console.');
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(markCopied).catch(fallbackCopy);
+      } else {
+        fallbackCopy();
+      }
+    }
+
+    _buildExportMenuConfig() {
+      const gsc = global.GameSettingsCanvas;
+      const cfg = gsc?.config || {};
+      const clone = (o) => JSON.parse(JSON.stringify(o));
+
+      const rawPresets = Array.isArray(cfg.presets) ? cfg.presets.map(p => clone(p)) : [];
+      const draft = gsc?.activePresetDraft;
+      let targetPresetRef = null;
+      if (draft?.draftItem) {
+        const dIdx = (cfg.presets || []).indexOf(draft.targetPreset);
+        if (dIdx >= 0) {
+          rawPresets[dIdx] = clone(draft.draftItem);
+          targetPresetRef = rawPresets[dIdx];
+        } else {
+          rawPresets.push(clone(draft.draftItem));
+          targetPresetRef = rawPresets[rawPresets.length - 1];
+        }
+      }
+
+      // Overlay any open sub-column String/Strain draft edits onto the cloned presets snapshot
+      const hist = Array.isArray(gsc?.history) ? gsc.history : [];
+      for (const h of hist) {
+        const sd = h?.presetDraft;
+        if (!sd?.draftItem || !sd?.list) continue;
+        const activeTarget = targetPresetRef || rawPresets[Math.max(0, Number(cfg.activePresetIndex || 0))];
+        if (!activeTarget) continue;
+        for (const grpKey of ['luck', 'blight']) {
+          for (const vecKey of ['playfieldItems', 'materialItems']) {
+            const origList = (draft?.draftItem || cfg.presets?.[cfg.activePresetIndex || 0])?.[grpKey]?.[vecKey];
+            if (sd.list === origList && Array.isArray(activeTarget[grpKey]?.[vecKey])) {
+              const iIdx = origList.indexOf(sd.targetItem);
+              if (iIdx >= 0) activeTarget[grpKey][vecKey][iIdx] = clone(sd.draftItem);
+            }
+          }
+        }
+      }
+
+      const normVec = (it, maxSpawn) => ({
+        id: it.id,
+        name: it.name || 'Vector',
+        turnStart: Math.max(0, Math.min(432, Number(it.turnStart ?? 1))),
+        turnInterval: Math.max(1, Math.min(144, Number(it.turnInterval ?? 1))),
+        turnEnd: Math.max(1, Math.min(432, Number(it.turnEnd ?? 24))),
+        spawnCount: Math.max(1, Math.min(maxSpawn, Number(it.spawnCount ?? 1))),
+        chance: Math.max(0, Math.min(100, Number(it.chance ?? 0))),
+        dupInterval: Math.max(0, Math.min(144, Number(it.dupInterval ?? 0))),
+        tagNumber: String(it.tagNumber || '001').padStart(3, '0'),
+        isEndOfMatch: !!it.isEndOfMatch
+      });
+      const normGroup = (g = {}) => ({
+        activePlayfieldIndex: Math.max(0, Number(g.activePlayfieldIndex || 0)),
+        activeMaterialIndex: Math.max(0, Number(g.activeMaterialIndex || 0)),
+        playfieldItems: (Array.isArray(g.playfieldItems) ? g.playfieldItems : []).map(it => normVec(it, 24)),
+        materialItems: (Array.isArray(g.materialItems) ? g.materialItems : []).map(it => normVec(it, 4))
+      });
+
+      const presets = rawPresets.map((p, idx) => {
+        const m = p.match || {};
+        return {
+          id: p.id || `preset_${idx + 1}`,
+          name: p.name || `Preset ${idx + 1}`,
+          tagNumber: String(p.tagNumber || (idx + 1)).padStart(3, '0'),
+          isDefault: !!p.isDefault,
+          match: {
+            materialComposition: m.materialComposition === 'Random' ? 'Random' : 'Even',
+            luckComposition: m.luckComposition === 'Random' ? 'Random' : 'Ether',
+            startingSpells: Math.max(0, Math.min(3, Number(m.startingSpells ?? 0))),
+            rounds: Math.max(12, Math.min(432, Number(m.rounds ?? 144))),
+            boardRadius: Math.max(3, Math.min(12, Number(m.boardRadius ?? 6))),
+            isEndless: !!m.isEndless
+          },
+          luck: normGroup(p.luck),
+          blight: normGroup(p.blight)
+        };
+      });
+
+      return {
+        playerCount: Math.max(1, Math.min(6, Number(cfg.playerCount || 1))),
+        activePresetIndex: Math.max(0, Math.min(Math.max(0, presets.length - 1), Number(cfg.activePresetIndex || 0))),
+        presets
+      };
+    }
+
     initGameMenuTab() {
       const btnCopy = document.getElementById('btn-copy-game-menu-config');
       if (!btnCopy) return;
 
       btnCopy.addEventListener('click', () => {
-        const cfg = global.GameSettingsCanvas?.config || {};
-        const text = JSON.stringify(cfg, null, 2);
-        if (navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(text);
-        }
-        const orig = btnCopy.textContent;
-        btnCopy.textContent = '✓ Copied!';
-        setTimeout(() => { btnCopy.textContent = orig; }, 1500);
-        if (global.GameState?.showToast) {
-          global.GameState.showToast('📋 Game Menu config copied as JSON!');
-        }
+        const text = JSON.stringify(this._buildExportMenuConfig(), null, 2);
+        this._copyTextWithFeedback(text, btnCopy, '📋 Game Menu presets copied as JSON!');
         if (this.audio?.playClick) this.audio.playClick();
       });
     }
@@ -262,17 +368,8 @@
 
       if (btnCopy) {
         btnCopy.addEventListener('click', () => {
-          const d = getFramesData();
-          const text = JSON.stringify(d, null, 2);
-          if (navigator.clipboard?.writeText) {
-            navigator.clipboard.writeText(text);
-          }
-          const orig = btnCopy.textContent;
-          btnCopy.textContent = '✓ Copied!';
-          setTimeout(() => { btnCopy.textContent = orig; }, 1500);
-          if (global.GameState?.showToast) {
-            global.GameState.showToast('📋 UI Frame config copied as JSON!');
-          }
+          const text = JSON.stringify(getFramesData(), null, 2);
+          this._copyTextWithFeedback(text, btnCopy, '📋 UI Frame config copied as JSON!');
           if (this.audio?.playClick) this.audio.playClick();
         });
       }

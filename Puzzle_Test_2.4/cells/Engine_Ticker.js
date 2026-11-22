@@ -81,10 +81,10 @@
       const deck = this.deck;
       const deckSync = this.deckSync;
 
-      // Mobile Power Saver: gate both JS simulation & rendering to 30 FPS on touch/mobile viewports
+      // Mobile Power Saver: gate JS simulation & rendering to 30 FPS on phones/tablets only; Desktop caps at 60 Hz via FIXED_DT
       const isMobileRender = (typeof window !== 'undefined') && (
         window.matchMedia?.('(pointer: coarse)')?.matches ||
-        global.ResponsiveViewportAdapter?.viewportClass === 'compact-landscape'
+        Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560
       );
       if (isMobileRender && this.lastRenderMs && (now - this.lastRenderMs) < 32.0) {
         return;

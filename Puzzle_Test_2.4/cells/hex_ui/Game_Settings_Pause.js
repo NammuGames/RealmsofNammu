@@ -32,6 +32,7 @@
     const state = global.GameState;
     const net = global.NetworkP2PManager;
     const mc = global.MemoryCardManager;
+    global.UISidebarDeck?.closeMaterialsColumn?.(true);
 
     this.close(async () => {
       if (state?.matchStarted) {
@@ -116,6 +117,7 @@
   };
 
   Proto.quitToSetup = function() {
+    global.UISidebarDeck?.closeMaterialsColumn?.(true);
     const pIdx = this.pausedPlayerIndex ?? (global.GameState?.activePlayerIndex || 0);
     this.forfeitPlayerByIndex(pIdx);
   };

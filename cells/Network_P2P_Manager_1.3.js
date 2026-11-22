@@ -155,29 +155,8 @@
     this._updateDrawerUI();
   };
 
-  // ── TUNING DRAWER P2P CONTROLS ────────────────────────────────────────────
-  proto._wireDrawerUI = function() {
-    const d = document;
-    d.getElementById('btn-p2p-host')?.addEventListener('click', () => this.hostRoom());
-    d.getElementById('btn-p2p-host-saved')?.addEventListener('click', () => this.hostSavedMatch());
-    d.getElementById('btn-p2p-join')?.addEventListener('click', () => {
-      const val = d.getElementById('input-p2p-room-code')?.value || '';
-      this.joinRoom(val);
-    });
-    d.getElementById('btn-p2p-pass-host')?.addEventListener('click', () => this.passHost());
-    d.getElementById('btn-p2p-leave')?.addEventListener('click', () => this.leaveRoom());
-  };
-
+  // ── GAME MENU / PAUSE CANVAS LIVE REFRESH ─────────────────────────────────
   proto._updateDrawerUI = function() {
-    const statusEl = document.getElementById('p2p-status-box');
-    if (statusEl) {
-      if (this.role === 'offline') {
-        statusEl.textContent = 'Status: Offline (Local Mode)';
-      } else {
-        const turnState = this.isLocalPlayersTurn() ? 'YOUR TURN' : 'SPECTATING (Locked)';
-        statusEl.textContent = `Role: ${this.role.toUpperCase()} | Room: ${this.roomCode}\nPeers: ${this.connections.size} | ${turnState}`;
-      }
-    }
     const gsc = global.GameSettingsCanvas;
     const topTitle = gsc?.history?.length ? gsc.history[gsc.history.length - 1]?.title : '';
     if (gsc?.active && (gsc.mode === 'pause' || !topTitle || topTitle === 'Root' || topTitle === 'Lobby' || topTitle === 'Host' || topTitle === 'Join')) {

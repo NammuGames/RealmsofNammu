@@ -152,9 +152,17 @@
       },
       {
         type: 'full_stepper', id: 'spawn-count', title: 'Spawns',
-        valText: `${item.spawnCount ?? 1} Spawns`,
+        valText: (() => {
+          const maxSpawns = isPlayfield ? 24 : 4;
+          const cnt = Math.max(1, Math.min(maxSpawns, item.spawnCount ?? 1));
+          return `${cnt} ${cnt === 1 ? 'Spawn' : 'Spawns'}`;
+        })(),
         isCenterGhost: isZeroChance,
-        onDelta: (d) => { item.spawnCount = Math.max(1, Math.min(24, (item.spawnCount ?? 1) + d)); self.buildScene(); }
+        onDelta: (d) => {
+          const maxSpawns = isPlayfield ? 24 : 4;
+          item.spawnCount = Math.max(1, Math.min(maxSpawns, (item.spawnCount ?? 1) + d));
+          self.buildScene();
+        }
       },
       {
         type: 'full_stepper', id: 'chance', title: isLuck ? 'Luck Chance' : 'Infection Chance', valText: `${item.chance}% ${isLuck ? 'Spawn' : 'Contagion'}`,

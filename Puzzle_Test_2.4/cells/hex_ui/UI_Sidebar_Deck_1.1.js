@@ -27,10 +27,15 @@
     global.UICardsDeck?.syncComponentsColumn();
   };
 
+  Proto._getSidebarSlideDist = function() {
+    const k = Math.max(0.25, Math.min(2.0, Number(this.state?.sidebarBtnScale ?? 1.0) || 1.0));
+    return Math.max(280, (this.state?.btnW2 || 200) * k + 60);
+  };
+
   Proto.openComponentsColumn = function() {
     this.syncComponentsColumn();
     this.state.rightSidebarActiveCol = 3;
-    const slideDist = Math.max(280, this.state.btnW2 + 60);
+    const slideDist = this._getSidebarSlideDist();
     this.state.rightSidebarTargetSlideX = -slideDist * 3;
     if (this.colComponents) {
       this.colComponents.visible = true;
@@ -57,7 +62,7 @@
     this.materialsOpenedFromCol = (isForesight || this.state.rightSidebarActiveCol === 1) ? 1 : 0;
     this.syncMaterialsQueueColumn();
     this.state.rightSidebarActiveCol = 2;
-    const slideDist = Math.max(280, this.state.btnW2 + 60);
+    const slideDist = this._getSidebarSlideDist();
     this.state.rightSidebarTargetSlideX = -slideDist * 2;
     if (this.colMaterials) {
       this.colMaterials.visible = true;
@@ -135,7 +140,7 @@
 
     this.syncSpellbookColumnWithGameState();
     this.state.rightSidebarActiveCol = 1;
-    const slideDist = Math.max(280, this.state.btnW2 + 60);
+    const slideDist = this._getSidebarSlideDist();
     this.state.rightSidebarTargetSlideX = -slideDist;
     if (this.colSpellbook) {
       this.colSpellbook.visible = true;
@@ -189,7 +194,7 @@
 
   Proto.updateRightSidebarDeck = function() {
     if (!this.colControls || !this.colSpellbook) return;
-    const slideDist = Math.max(280, (this.state.btnW2 || 200) + 60);
+    const slideDist = this._getSidebarSlideDist();
     const dx = this.state.rightSidebarTargetSlideX - this.state.rightSidebarSlideX;
     this.state.rightSidebarSlideX += Math.abs(dx) > 0.3 ? dx * 0.18 : dx;
 
@@ -230,28 +235,37 @@
     if (valNodes) valNodes.textContent = (3 + count * 2).toString();
   };
 
-  Proto.syncSidebarButtonDimensions = function() {
+  Proto.syncSidebarButtonDimensions = function(skipAtlas = false) {
     const h = this.state.btnHeight, w1 = this.state.btnW1, w2 = Math.max(w1, this.state.btnW2);
     this.state.btnW2 = w2;
+    const k = Math.max(0.25, Math.min(2.0, Number(this.state.sidebarBtnScale ?? 1.0) || 1.0));
     const apex = Math.max(0, (w2 - w1) * 0.5), spacing = this.state.btnSpacing;
 
-    this.leftButtonNodes.forEach(btn => {
+    const applyBtn = (btn, syncText = false) => {
       btn.setDimensions(w1, h, apex, 'flat');
-      const vp = btn.getTrait('viewport'), txt = btn.getTrait('text');
-      if (vp) vp.offsetX = -Math.round(w1 * 0.28);
-      if (txt && txt.align === 'left') txt.offsetX = Math.round(w1 * 0.11);
-    });
+      btn.scale = k;
+      if (syncText) {
+        const vp = btn.getTrait('viewport'), txt = btn.getTrait('text');
+        if (vp) vp.offsetX = -Math.round(w1 * 0.28);
+        if (txt && txt.align === 'left') txt.offsetX = Math.round(w1 * 0.11);
+      }
+    };
 
-    this.rightButtonNodes.forEach(btn => btn.setDimensions(w1, h, apex, 'flat'));
-    global.UICardsDeck?.spellButtonNodes?.forEach(btn => btn.setDimensions(w1, h, apex, 'flat'));
-    global.UICardsDeck?.materialsButtonNodes?.forEach(btn => btn.setDimensions(w1, h, apex, 'flat'));
-    global.UICardsDeck?.componentButtonNodes?.forEach(btn => btn.setDimensions(w1, h, apex, 'flat'));
+    this.leftButtonNodes.forEach(btn => applyBtn(btn, true));
+    this.rightButtonNodes.forEach(btn => applyBtn(btn));
+    global.UICardsDeck?.spellButtonNodes?.forEach(btn => applyBtn(btn));
+    global.UICardsDeck?.materialsButtonNodes?.forEach(btn => applyBtn(btn));
+    global.UICardsDeck?.componentButtonNodes?.forEach(btn => applyBtn(btn));
+    if (global.UICardsDeck?.btnCompAction) applyBtn(global.UICardsDeck.btnCompAction);
 
     [this.leftList, this.ctrlList, this.spellList, this.materialsList, this.componentsList].forEach(l => {
-      if (l) { l.slotHeight = h; l.spacing = spacing; l.layoutChildren(); }
+      if (l) { l.slotHeight = h * k; l.spacing = spacing; l.layoutChildren(); }
     });
+    if (this.state.rightSidebarActiveCol > 0) {
+      this.state.rightSidebarTargetSlideX = -this._getSidebarSlideDist() * this.state.rightSidebarActiveCol;
+    }
 
-    if (global.HexFrameAtlas) global.HexFrameAtlas.bakeButtonStamps(w1, h, apex);
+    if (!skipAtlas && global.HexFrameAtlas) global.HexFrameAtlas.bakeButtonStamps(w1, h, apex);
   };
 
 })(typeof window !== 'undefined' ? window : this);

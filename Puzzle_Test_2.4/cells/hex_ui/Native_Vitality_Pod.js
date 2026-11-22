@@ -229,8 +229,9 @@
         render(ctx, node) {
           if (!global.UIButtonSprites?.drawCornerHotkey) return;
           const cState = global.COSMOS_STATE || {};
-          const btnH = cState.btnHeight ?? 124;
-          const hkY = cState.hotkeyY ?? (global.UIButtonSprites.config?.hotkeyY ?? 48);
+          const btnScale = cState.sidebarBtnScale ?? 1.0;
+          const btnH = (cState.btnHeight ?? 124) * btnScale;
+          const hkY = (cState.hotkeyY ?? (global.UIButtonSprites.config?.hotkeyY ?? 48)) * btnScale;
           const distFromEdge = (btnH * 0.5) - hkY;
           const podH = self.config.podHeight || 72;
           const ky = (podH * 0.5) - distFromEdge;

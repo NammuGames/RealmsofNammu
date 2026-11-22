@@ -11,10 +11,10 @@
 
   const OVERLAY_ID = 'rotate-landscape-overlay';
   const STYLE_ID = 'responsive-viewport-adapter-css';
-  // Single Source of Truth for calibrated UI geometry (1920x945 desktop baseline)
+  // Single Source of Truth for calibrated UI geometry (1920x960 desktop baseline)
   const UI_BASELINE = Object.freeze({
     width: 1920,
-    height: 945,
+    height: 960,
     sidebarWidth: 240,
     gapX: 5,
     minBoardWidth: 1430,
@@ -302,9 +302,9 @@
       const isCoarseMobile = global.matchMedia?.('(pointer: coarse)')?.matches || Math.min(cssW, cssH) <= 560;
       const dprCap = isCoarseMobile ? 1 : MAX_DPR;
       const dpr = Math.min(dprCap, Math.max(1, global.devicePixelRatio || 1));
-      const stageScale = Math.min(1.0, cssW / VIRTUAL_BASE_W, cssH / VIRTUAL_BASE_H);
-      const virtualW = cssW / stageScale;
-      const virtualH = cssH / stageScale;
+      const stageScale = Math.min(cssW / VIRTUAL_BASE_W, cssH / VIRTUAL_BASE_H);
+      const virtualW = VIRTUAL_BASE_W;
+      const virtualH = VIRTUAL_BASE_H;
 
       this.dpr = dpr;
       this.stageScale = stageScale;
@@ -358,24 +358,27 @@
       }
     }
 
-    applyLayoutToEngine(w, h) {
+    applyLayoutToEngine() {
       const engine = this.engine;
       if (!engine || !engine.initialized) return;
 
-      const vw = Math.max(VIRTUAL_BASE_W, w || this.virtualWidth || VIRTUAL_BASE_W);
-      const vh = Math.max(VIRTUAL_BASE_H, h || this.virtualHeight || VIRTUAL_BASE_H);
-      const isDesktop = (this.cssWidth >= VIRTUAL_BASE_W && this.cssHeight >= VIRTUAL_BASE_H);
-      this.viewportClass = this.isPortrait ? 'portrait-locked' : (isDesktop ? 'desktop' : 'compact-landscape');
+      const vw = VIRTUAL_BASE_W;
+      const vh = VIRTUAL_BASE_H;
+      const isCoarseMobile = global.matchMedia?.('(pointer: coarse)')?.matches || Math.min(this.cssWidth || 999, this.cssHeight || 999) <= 560;
+      this.viewportClass = this.isPortrait ? 'portrait-locked' : (isCoarseMobile ? 'compact-landscape' : 'desktop');
 
-      // Single Universal Virtual Anchor: every HUD child lives at 1.0 scale in (virtualW x virtualH)
-      const rootScale = (this.dpr || 1.0) * (this.stageScale || 1.0);
+      // Single Locked-Ratio Stage: uniform scale (up or down) centered inside full-bleed cosmic backdrop
+      const dpr = this.dpr || 1.0;
+      const rootScale = dpr * (this.stageScale || 1.0);
+      const backW = (this.cssWidth || vw) * dpr;
+      const backH = (this.cssHeight || vh) * dpr;
       this.sidebarScale = 1.0;
       this.podScale = 1.0;
       this.overlayScale = 1.0;
 
       if (engine.root) {
-        engine.root.position.x = 0;
-        engine.root.position.y = 0;
+        engine.root.position.x = (backW - vw * rootScale) * 0.5;
+        engine.root.position.y = (backH - vh * rootScale) * 0.5;
         engine.root.scale = rootScale;
       }
       if (engine.leftSidebar) engine.leftSidebar.scale = 1.0;

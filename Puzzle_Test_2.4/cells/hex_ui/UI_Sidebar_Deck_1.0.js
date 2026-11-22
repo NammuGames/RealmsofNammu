@@ -64,7 +64,9 @@
       this.rightList = this.ctrlList;
       this.colControls.addTrait(this.ctrlList);
 
-      const initialSlideDist = Math.max(280, state.btnW2 + 60);
+      const initialSlideDist = typeof this._getSidebarSlideDist === 'function'
+        ? this._getSidebarSlideDist()
+        : Math.max(280, (state.btnW2 || 200) * (state.sidebarBtnScale ?? 1.0) + 60);
       this.colSpellbook = new HexNode({
         id: 'col-spellbook', position: { x: initialSlideDist, y: 0 }, clipContent: false,
         style: { bgOpacity: 0, innerHighlight: { enabled: false }, outerHighlight: { enabled: false } }
@@ -151,6 +153,9 @@
       }
 
       if (global.UIDeckSync) global.UIDeckSync.syncMaterialsTrayWithGameState();
+      if (typeof this.syncSidebarButtonDimensions === 'function') {
+        this.syncSidebarButtonDimensions(true);
+      }
       if (typeof this.updateVisibleButtonCount === 'function') {
         this.updateVisibleButtonCount(state.sidebarBtnCount);
       }
@@ -358,7 +363,6 @@
               global.GameSettingsCanvas.config.activePresetIndex = draft.index;
               global.GameSettingsCanvas.activePresetDraft = null;
               global.GameSettingsCanvas.popColumn();
-              global.GameSettingsCanvas.buildScene();
               return;
             }
             if (draft.isDefault) {
@@ -366,7 +370,6 @@
                 global.GameSettingsCanvas.config.activePresetIndex = newIdx;
                 global.GameSettingsCanvas.activePresetDraft = null;
                 global.GameSettingsCanvas.popColumn();
-                global.GameSettingsCanvas.buildScene();
               });
               return;
             } else {
@@ -376,14 +379,12 @@
               global.GameState?.showToast?.(`✦ Saved Preset: "${draft.targetPreset.name}"`);
               global.GameSettingsCanvas.activePresetDraft = null;
               global.GameSettingsCanvas.popColumn();
-              global.GameSettingsCanvas.buildScene();
               return;
             }
           }
         }
-        const committed = global.GameSettingsCanvas.commitPendingDeletions?.();
+        global.GameSettingsCanvas.commitPendingDeletions?.();
         global.GameSettingsCanvas.popColumn();
-        if (committed) global.GameSettingsCanvas.buildScene?.();
         return;
       }
       if (this.state.rightSidebarActiveCol === 1) {

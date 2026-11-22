@@ -140,7 +140,6 @@
     'cells/hex_ui/Menu_Tuning_Lab.js',
     'cells/hex_ui/Warp_Halo_Tuning_Lab.js',
     'cells/hex_ui/Audio_Tuning_Lab.js',
-    'cells/hex_ui/Match_Start_Tuning_Lab.js',
     'cells/hex_ui/Board_Edit_Lab.js',
     'cells/hex_ui/Board_Edit_Ops.js',
     'cells/hex_ui/Board_Edit_Renderer.js',
@@ -239,7 +238,6 @@
         if (global.BorderTuningLab) global.BorderTuningLab.init(dom, audio);
         if (global.WarpHaloTuningLab) global.WarpHaloTuningLab.init(dom, audio);
         if (global.AudioTuningLab) global.AudioTuningLab.init(dom, audio);
-        if (global.MatchStartTuningLab) global.MatchStartTuningLab.init(dom, audio);
         if (global.EmblemTunerHUD) global.EmblemTunerHUD.init();
         if (global.GameSettingsCanvas) global.GameSettingsCanvas.init(engine);
 

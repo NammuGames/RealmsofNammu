@@ -183,13 +183,12 @@
     invalidateBackground() { this.bgKey = ''; }
 
     _getMatchAnimTimings() {
-      const lab = global.MatchStartTuningLab;
-      const beatSec = lab?.getBeatSec?.() ?? (global.H_TIMING?.BEAT_SEC ?? (Math.pow(12, 8) / 1420405751.768));
+      const beatSec = global.H_TIMING?.BEAT_SEC ?? (Math.pow(12, 8) / 1420405751.768);
       return {
         beatSec,
-        tileSpawnSec: lab?.getTileSpawnSec?.() ?? (beatSec * 3),
-        ringSpacingSec: lab?.getRingSpacingSec?.() ?? (beatSec * 0.5),
-        boundaryFadeSec: lab?.getBoundaryFadeSec?.() ?? beatSec
+        tileSpawnSec: beatSec * 3,
+        ringSpacingSec: beatSec * 0.5,
+        boundaryFadeSec: beatSec
       };
     }
 

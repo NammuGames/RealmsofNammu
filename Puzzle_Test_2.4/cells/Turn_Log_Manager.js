@@ -332,11 +332,17 @@
     markViewed(seq) { if (typeof seq === 'number' && seq > this.lastViewedSeq) this.lastViewedSeq = seq; }
 
     exportState() {
+      const pending = this.hasPendingEntries();
+      const deferred = (pending && global.TurnLogPlayer?.deferredTurnSnap)
+        ? deepClone(global.TurnLogPlayer.deferredTurnSnap)
+        : null;
+      if (deferred && deferred.turnLog) delete deferred.turnLog;
       return {
         matchId: this.matchId,
         nextSeq: this.nextSeq,
         lastViewedSeq: this.lastViewedSeq,
-        hostLog: deepClone(this.hostLog)
+        hostLog: deepClone(this.hostLog),
+        deferredTurnSnap: deferred
       };
     }
 
@@ -350,6 +356,11 @@
         this.lastViewedSeq = Math.max(this.lastViewedSeq, data.lastViewedSeq);
       }
       this.pendingQueue = this.hostLog.filter(e => e && e.seq > this.lastViewedSeq);
+      if (global.TurnLogPlayer) {
+        global.TurnLogPlayer.deferredTurnSnap = (this.pendingQueue.length > 0 && data.deferredTurnSnap)
+          ? deepClone(data.deferredTurnSnap)
+          : null;
+      }
       return true;
     }
   }

@@ -132,10 +132,9 @@
 
     if (msg.type === 'LOG_SYNC_REQ' && this.role === 'host') {
       const entries = global.TurnLogManager?.getEntriesAfter?.(msg.afterSeq || 0) || [];
-      const targetSnap = global.MemoryCardManager?.capturePuzzleState?.();
-      if (targetSnap && targetSnap.turnLog) targetSnap.turnLog = undefined;
+      const { snap: targetSnap, snapSeq } = this._getAuthoritativeNetSnap(false);
       this._publishRoom?.({
-        type: 'LOG_SYNC_BATCH', entries, targetSnap,
+        type: 'LOG_SYNC_BATCH', entries, targetSnap, snapSeq,
         seatOwners: this.seatOwners?.length ? this.seatOwners : undefined
       }, fromPeerId);
       return;
@@ -159,7 +158,10 @@
         global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
         global.BoardRenderer?.render?.();
       } else if (msg.targetSnap && !lm?.hasPendingEntries?.() && !lp?.active) {
-        this._applyRemoteStateSync(msg.targetSnap, null, 'TURN', 0, msg.seatOwners || null);
+        const localSeq = lm?.lastViewedSeq || 0;
+        if (typeof msg.snapSeq === 'number' && localSeq > msg.snapSeq) return;
+        if (global.GameState?.matchStarted && localSeq >= (msg.snapSeq || 0)) return;
+        this._applyRemoteStateSync(msg.targetSnap, null, 'TURN', msg.snapSeq || 0, msg.seatOwners || null, typeof msg.snapSeq === 'number' ? msg.snapSeq : null);
       }
       return;
     }
@@ -185,7 +187,11 @@
       if (msg.syncId && msg.syncId === this._lastRemoteSyncKey) return;
       this._lastRemoteSyncKey = msg.syncId || '';
       if (this._pendingSync) { clearInterval(this._pendingSync.timer); this._pendingSync = null; }
-      this._applyRemoteStateSync(msg.snap, msg.logEntry || null, msg.reason || 'TURN', msg.hostMaxSeq || 0, msg.seatOwners || null);
+      this._applyRemoteStateSync(
+        msg.snap, msg.logEntry || null, msg.reason || 'TURN',
+        msg.hostMaxSeq || 0, msg.seatOwners || null,
+        typeof msg.snapSeq === 'number' ? msg.snapSeq : null
+      );
     }
   };
 
@@ -223,17 +229,30 @@
     return sent;
   };
 
+  proto._getAuthoritativeNetSnap = function(saveFirst = false) {
+    const mc = global.MemoryCardManager;
+    const lm = global.TurnLogManager;
+    const lp = global.TurnLogPlayer;
+    const hostMaxSeq = lm?.hostLog?.length ? lm.hostLog[lm.hostLog.length - 1].seq : 0;
+    const savedSnap = saveFirst ? mc?.saveActivePuzzleMatch?.() : mc?.capturePuzzleState?.();
+    if (this.role === 'host' && lm?.hasPendingEntries?.() && lp?.deferredTurnSnap) {
+      const auth = lp.deferredTurnSnap;
+      const netSnap = auth.turnLog ? { ...auth, turnLog: undefined } : auth;
+      return { snap: netSnap, hostMaxSeq, snapSeq: hostMaxSeq };
+    }
+    const netSnap = savedSnap?.turnLog ? { ...savedSnap, turnLog: undefined } : (savedSnap || null);
+    return { snap: netSnap, hostMaxSeq, snapSeq: lm?.lastViewedSeq || 0 };
+  };
+
   proto.syncFullState = function(reason = 'TURN') {
     if (!this.isConnected() || this._applyingRemote) return;
-    const snap = global.MemoryCardManager?.saveActivePuzzleMatch?.();
-    if (!snap) return;
     const lm = global.TurnLogManager;
+    const { snap: netSnap, hostMaxSeq, snapSeq } = this._getAuthoritativeNetSnap(true);
+    if (!netSnap) return;
     const latestEntry = (reason === 'TURN_END' && lm?.hostLog?.length) ? lm.hostLog[lm.hostLog.length - 1] : null;
-    const hostMaxSeq = lm?.hostLog?.length ? lm.hostLog[lm.hostLog.length - 1].seq : 0;
-    const netSnap = snap.turnLog ? { ...snap, turnLog: undefined } : snap;
     const syncId = `${this.myPeerId}:${++this._syncSeq}`;
     const payload = {
-      type: 'STATE_SYNC', sender: this.myPeerId, reason, hostMaxSeq, syncId,
+      type: 'STATE_SYNC', sender: this.myPeerId, reason, hostMaxSeq, snapSeq, syncId,
       seatOwners: this.seatOwners?.length ? this.seatOwners : undefined,
       snap: netSnap, logEntry: latestEntry
     };
@@ -284,14 +303,14 @@
     } finally { this._applyingRemote = false; }
   };
 
-  proto._applyRemoteStateSync = async function(snap, logEntry = null, reason = 'TURN', hostMaxSeq = 0, seatOwners = null) {
+  proto._applyRemoteStateSync = async function(snap, logEntry = null, reason = 'TURN', hostMaxSeq = 0, seatOwners = null, snapSeq = null) {
     this.matchStarted = true;
     this.roomLocked = true;
     if (this.role === 'guest' && Array.isArray(seatOwners) && seatOwners.length > 0) {
       this.seatOwners = seatOwners.slice();
     }
     if (this.role === 'guest' && this._awaitingEnterMatch && (reason === 'JOIN' || reason === 'MATCH_RESUME')) {
-      this.pendingMatchStartSnap = { snap, logEntry, reason, hostMaxSeq, seatOwners };
+      this.pendingMatchStartSnap = { snap, logEntry, reason, hostMaxSeq, seatOwners, snapSeq };
       this._notifyLobbyUpdate?.();
       return;
     }
@@ -335,6 +354,24 @@
       }
       if (lp) lp.deferredTurnSnap = snap;
       this.requestLogCatchUp();
+      this._updateDrawerUI();
+      return;
+    }
+
+    const localSeq = lm?.lastViewedSeq || 0;
+    const isStaleHostPreLogSnap = (this.role === 'guest') && typeof snapSeq === 'number' && localSeq > snapSeq;
+    const isRedundantResume = (this.role === 'guest') && reason === 'MATCH_RESUME'
+      && !!global.GameState?.matchStarted && localSeq >= hostMaxSeq && !lm?.hasPendingEntries?.();
+    if (isStaleHostPreLogSnap || isRedundantResume) {
+      if (global.RoomStatCanvas?.isOpen?.()) {
+        global.RoomStatCanvas.close({ returnToMenu: false, immediate: true, silent: true });
+      }
+      if (!global.GameState?.matchStarted && isStaleHostPreLogSnap && savedLocal && !savedLocal.isLobbyPlaceholder) {
+        global.MemoryCardManager?.restorePuzzleState?.(savedLocal);
+      }
+      if (this.role === 'guest' && (reason === 'JOIN' || reason === 'MATCH_RESUME') && hostMaxSeq > localSeq) {
+        this.requestLogCatchUp();
+      }
       this._updateDrawerUI();
       return;
     }

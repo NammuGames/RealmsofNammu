@@ -129,13 +129,12 @@
       this._syncLockedRoomSeats();
       this._broadcastRoster?.();
       if (!wasConnected) {
-        const snap = global.MemoryCardManager?.capturePuzzleState?.();
-        const lm = global.TurnLogManager;
-        const hostMaxSeq = lm?.hostLog?.length ? lm.hostLog[lm.hostLog.length - 1].seq : 0;
-        if (snap) {
-          const netSnap = snap.turnLog ? { ...snap, turnLog: undefined } : snap;
+        const { snap: netSnap, hostMaxSeq, snapSeq } = this._getAuthoritativeNetSnap
+          ? this._getAuthoritativeNetSnap(false)
+          : { snap: null, hostMaxSeq: 0, snapSeq: 0 };
+        if (netSnap) {
           this._publishRoom?.({
-            type: 'STATE_SYNC', reason: 'JOIN', hostMaxSeq,
+            type: 'STATE_SYNC', reason: 'JOIN', hostMaxSeq, snapSeq,
             seatOwners: this.seatOwners?.length ? this.seatOwners.slice() : undefined,
             snap: netSnap
           }, fromPeerId);
@@ -231,7 +230,8 @@
         pending.logEntry || null,
         pending.reason || 'JOIN',
         pending.hostMaxSeq || 0,
-        pending.seatOwners || null
+        pending.seatOwners || null,
+        pending.snapSeq ?? null
       );
       return true;
     }

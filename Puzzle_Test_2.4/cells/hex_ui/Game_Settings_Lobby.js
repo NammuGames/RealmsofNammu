@@ -120,7 +120,7 @@
     // Top slot (Index 0): Fused Match Selector + Match Name -> always opens Matches list
     const activeCard = armedDraft || (isStartedSave ? armedSave : null);
     const pendingName = String(this.config.pendingMatchName || (isHosting ? net.matchName : '') || '').trim();
-    const topLeftTitle = activeCard ? (activeCard.matchName || activeCard.name || 'Match') : (pendingName || 'New Match');
+    const topLeftTitle = activeCard ? (activeCard.matchName || activeCard.name || 'Match') : (pendingName || 'Select Match');
     const topRightTag = activeCard && mc?.getMatchTagLabel ? mc.getMatchTagLabel(activeCard) : 'Create';
     const topMatchBtn = {
       type: 'preset_name',

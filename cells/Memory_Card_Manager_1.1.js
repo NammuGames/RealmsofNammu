@@ -130,52 +130,26 @@
     g.lobbyMode = lobbyMode;
 
     return {
-      id,
-      game: 'puzzle',
-      name: matchName,
-      matchName,
-      matchType,
-      tagNumber,
-      isDraft: false,
-      matchStarted: true,
-      isLobbyPlaceholder: false,
-      roomCode,
-      roleBadge,
-      lobbyMode,
-      createdAt: existing?.createdAt || Date.now(),
-      updatedAt: Date.now(),
-      round: g.round,
-      maxRounds: g.maxRounds,
-      isEndless: !!g.isEndless,
-      level: g.level,
-      boardRadius: g.boardRadius,
-      playerCount: g.playerCount,
-      activePlayerIndex: g.activePlayerIndex,
-      currentPlayerId: g.currentPlayerId,
-      score: g.score,
-      hp: g.hp,
-      maxHp: g.maxHp,
-      pendingHeal: g.pendingHeal || 0,
-      gameOver: !!g.gameOver,
-      turnPhase: g.turnPhase || 'MID_TURN',
-      placedThisTurn: !!g.placedThisTurn,
-      isMaterialSelected: !!g.isMaterialSelected,
-      selectedTrayIndex: g.selectedTrayIndex || 0,
-      selectedRotation: g.selectedRotation || 0,
+      id, game: 'puzzle', name: matchName, matchName, matchType, tagNumber,
+      isDraft: false, matchStarted: true, isLobbyPlaceholder: false,
+      roomCode, roleBadge, lobbyMode,
+      createdAt: existing?.createdAt || Date.now(), updatedAt: Date.now(),
+      round: g.round, maxRounds: g.maxRounds, isEndless: !!g.isEndless,
+      level: g.level, boardRadius: g.boardRadius, playerCount: g.playerCount,
+      activePlayerIndex: g.activePlayerIndex, currentPlayerId: g.currentPlayerId,
+      score: g.score, hp: g.hp, maxHp: g.maxHp, pendingHeal: g.pendingHeal || 0,
+      gameOver: !!g.gameOver, turnPhase: g.turnPhase || 'MID_TURN',
+      placedThisTurn: !!g.placedThisTurn, isMaterialSelected: !!g.isMaterialSelected,
+      selectedTrayIndex: g.selectedTrayIndex || 0, selectedRotation: g.selectedRotation || 0,
       upDownAxisState: g.upDownAxisState || 0,
       placementCursor: deepClone(g.placementCursor || { q: 0, r: 0 }),
       activeMaterialMod: deepClone(g.activeMaterialMod || null),
-      roundBonusPoints: g.roundBonusPoints || 0,
-      archZones: deepClone(g.archZones || []),
+      roundBonusPoints: g.roundBonusPoints || 0, archZones: deepClone(g.archZones || []),
       fortifiedTiles: Array.from(g.fortifiedTiles || []),
       matchConfig: deepClone(g.matchConfig || existing?.matchConfig || null),
-      presetSnapshot,
-      presetName: g.matchConfig?.presetName || existing?.presetName || 'Meditate',
-      rosterMeta,
-      boardTiles,
-      players: deepClone(g.players || []),
-      disease: diseaseData,
-      turnLog: global.TurnLogManager?.exportState?.() || null
+      presetSnapshot, presetName: g.matchConfig?.presetName || existing?.presetName || 'Meditate',
+      rosterMeta, boardTiles, players: deepClone(g.players || []),
+      disease: diseaseData, turnLog: global.TurnLogManager?.exportState?.() || null
     };
   };
 
@@ -373,9 +347,11 @@
   };
   proto.deleteMatch = proto.deleteSavedMatch;
 
-  proto.restorePuzzleState = function(snap) {
+  proto.restorePuzzleState = function(snap, opts = {}) {
     const g = global.GameState;
     if (!snap || !g || snap.isDraft || snap.matchType === 'Draft') return false;
+    const wasMatchStarted = !!g.matchStarted;
+    const animateSpawn = (opts.animateSpawn !== undefined) ? !!opts.animateSpawn : !wasMatchStarted;
 
     if (global.GameSettingsCanvas?.isOpen?.()) global.GameSettingsCanvas.close();
     global.BoardRenderer?.cancelMatchStartAnim?.();
@@ -475,11 +451,28 @@
     }
     g.evaluateSigils?.();
     global.POVManager?.onMatchRestored?.(g.activePlayerIndex || 0);
-    g.syncUI();
-    global.UICardsDeck?.syncMaterialsQueueColumn?.();
-    global.UICardsDeck?.syncSpellbookColumn?.();
-    global.BoardRenderer?.render?.();
-    if (isMyTurn && g.turnPhase === 'START_TURN' && !g.gameOver && global.TurnManager?.startPlayerTurn) {
+    const refreshBoardUI = () => {
+      g.syncUI();
+      global.UICardsDeck?.syncMaterialsQueueColumn?.();
+      global.UICardsDeck?.syncSpellbookColumn?.();
+      global.BoardRenderer?.render?.();
+    };
+    const finishRestoredTurn = () => {
+      const logPending = !!(global.TurnLogManager?.hasPendingEntries?.() || global.TurnLogPlayer?.active);
+      g.isMaterialSelected = !!(isMyTurn && !g.placedThisTurn && !g.gameOver && g.turnPhase !== 'START_TURN' && !logPending);
+      if (g.isMaterialSelected) {
+        global.MatchOrchestrator?.triggerActiveMaterialSpawnPulse?.(g);
+      }
+      refreshBoardUI();
+      if (isMyTurn && g.turnPhase === 'START_TURN' && !g.gameOver && !logPending && global.TurnManager?.startPlayerTurn) {
+        setTimeout(() => global.TurnManager.startPlayerTurn(), 60);
+      }
+    };
+    if (animateSpawn && global.MatchOrchestrator?.spawnBoardSilently) {
+      global.MatchOrchestrator.spawnBoardSilently(g, { onReady: finishRestoredTurn });
+    }
+    refreshBoardUI();
+    if ((!animateSpawn || !global.MatchOrchestrator?.spawnBoardSilently) && isMyTurn && g.turnPhase === 'START_TURN' && !g.gameOver && global.TurnManager?.startPlayerTurn) {
       setTimeout(() => global.TurnManager.startPlayerTurn(), 60);
     }
     return true;

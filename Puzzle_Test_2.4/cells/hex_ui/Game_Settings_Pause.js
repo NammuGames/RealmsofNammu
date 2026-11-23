@@ -32,6 +32,7 @@
     const state = global.GameState;
     const net = global.NetworkP2PManager;
     const mc = global.MemoryCardManager;
+    this._isLeavingMatch = true;
     global.UISidebarDeck?.closeMaterialsColumn?.(true);
 
     // Fully un-arm match/room state so returning to Root Menu presents a clean unjoined state
@@ -54,6 +55,7 @@
       }
       this.isMatchActive = false;
       const openCleanMenu = () => {
+        this._isLeavingMatch = false;
         this.isMatchActive = false;
         this.openSetupMenu('btn-nav-menu', { silent: true });
         global.GameState?.showToast?.('💾 Match saved — returned to Game Menu');

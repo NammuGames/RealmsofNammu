@@ -180,6 +180,7 @@
 
     open(origin = 'btn-nav-menu', options = {}) {
       if (this.active || this.isAnimating() || this._hasOtherOverlayOpen()) return;
+      this._isLeavingMatch = false;
       this.active = true;
       this._originId = origin;
       this._nextScroll = 0; this._nextTargetScroll = 0;

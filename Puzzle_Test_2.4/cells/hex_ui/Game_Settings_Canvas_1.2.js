@@ -360,6 +360,7 @@
   };
 
   Proto.launchMatch = function() {
+    if (this.isAnimating?.()) return;
     if (typeof this.launchMatchWithNamingGate === 'function') {
       return this.launchMatchWithNamingGate();
     }

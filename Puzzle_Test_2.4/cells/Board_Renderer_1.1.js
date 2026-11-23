@@ -252,8 +252,8 @@
       }
     }
 
-    // Offscreen fade wrapper for Layers 3.2 - 4.8 during Match End 3 H-Beat object fade-out
-    const objAlpha = this.matchEndAnim ? this.getMatchEndObjectsAlpha() : 1.0;
+    // Offscreen fade wrapper for Layers 3.2 - 4.8 during Match End fade-out or Match Start fade-in
+    const objAlpha = this.matchEndAnim ? this.getMatchEndObjectsAlpha() : (this.matchStartAnim ? this.getMatchStartObjectsAlpha() : 1.0);
     if (objAlpha <= 0.001) return;
     const outCtx = ctx;
     let fadeW = 0, fadeH = 0;

@@ -51,7 +51,7 @@
     const isOnline = !!(net?.isConnected?.() || (isStartedSave && armedSave.lobbyMode === 'Online'));
     const armedCard = armedDraft || (isStartedSave ? armedSave : null);
     const pendingMatchName = String(this.config.pendingMatchName || (net?.isConnected?.() ? net.matchName : '') || '').trim();
-    const lobbyLeft = armedCard ? (armedCard.matchName || armedCard.name || 'New Match') : (pendingMatchName || 'New Match');
+    const lobbyLeft = armedCard ? (armedCard.matchName || armedCard.name || 'Select Match') : (pendingMatchName || 'Select Match');
     const mcStatus = mc?.getSavedStatusLabel ? mc.getSavedStatusLabel() : 'Saved';
 
     this.renderColumn('Game Menu', false, [

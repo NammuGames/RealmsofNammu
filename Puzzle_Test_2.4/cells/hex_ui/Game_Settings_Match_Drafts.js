@@ -325,6 +325,7 @@
 
   /** Mandatory naming gate before launching a new match/Draft, or entering an armed saved match. */
   Proto.launchMatchWithNamingGate = function() {
+    if (this.isAnimating?.()) return;
     const self = this;
     const net = global.NetworkP2PManager;
     const mc = global.MemoryCardManager;

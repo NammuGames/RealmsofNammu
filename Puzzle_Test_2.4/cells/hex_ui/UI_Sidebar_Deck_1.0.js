@@ -340,6 +340,7 @@
         return;
       }
       if (global.GameSettingsCanvas?.isOpen?.()) {
+        if (global.GameSettingsCanvas.isAnimating?.()) return;
         global.AudioSynth?.playClick?.();
         if (global.GameSettingsCanvas.mode === 'pause') {
           global.GameSettingsCanvas.close();

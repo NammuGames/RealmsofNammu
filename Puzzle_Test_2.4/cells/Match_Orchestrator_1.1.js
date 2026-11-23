@@ -156,20 +156,8 @@
             state.placementCursor = { q: 0, r: 0 };
             global.POVManager?.onTurnStarted?.(state.activePlayerIndex || 0);
 
-            const activeMat = isLocalTurn && state.getActiveMaterial ? state.getActiveMaterial() : null;
-            const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);
-            if (activeMat && activeMat.activeCoords && global.BoardRippleRenderer?.playMaterialSpawnPulse) {
-              const coordsWithColors = activeMat.activeCoords.map(([dq, dr], idx) => ({
-                q: dq, r: dr, color: activeMat.colors[idx] || 'blue'
-              }));
-              global.BoardRippleRenderer.playMaterialSpawnPulse(coordsWithColors, () => {
-                global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
-                state.syncUI();
-                global.UICardsDeck?.syncSpellbookColumnWithGameState?.();
-                global.BoardRenderer?.render?.();
-              }, h3Sec);
-            } else if (activeMat) {
-              global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
+            if (isLocalTurn) {
+              this.triggerActiveMaterialSpawnPulse(state);
             }
 
             state.syncUI();
@@ -325,18 +313,51 @@
     return { wrappedNewRound: true, matchEnded: false };
   };
 
+  /**
+   * Replays the 3-HB ripple + scale spawn pulse for the active unplaced material.
+   * @param {Object} state
+   * @param {{ silent?: boolean }} [opts]
+   */
+  proto.triggerActiveMaterialSpawnPulse = function(state, opts = {}) {
+    if (!state) return false;
+    const activeMat = state.getActiveMaterial ? state.getActiveMaterial() : null;
+    if (!activeMat) return false;
+    if (activeMat.activeCoords && global.BoardRippleRenderer?.playMaterialSpawnPulse) {
+      const cq = state.placementCursor?.q || 0;
+      const cr = state.placementCursor?.r || 0;
+      const coordsWithColors = activeMat.activeCoords.map(([dq, dr], idx) => ({
+        q: cq + dq,
+        r: cr + dr,
+        color: activeMat.colors[idx] || 'blue'
+      }));
+      const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);
+      global.BoardRippleRenderer.playMaterialSpawnPulse(coordsWithColors, () => {
+        if (!opts.silent) global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
+        state.syncUI();
+        global.UICardsDeck?.syncSpellbookColumnWithGameState?.();
+        global.BoardRenderer?.render?.();
+      }, h3Sec);
+      return true;
+    }
+    if (!opts.silent) global.AudioSynth?.playMaterialBurst?.(4, 0, 0.5);
+    return false;
+  };
+
   proto._runBoardDespawnAnim = function(state, { silent = false, useGSF = false, onAfterDespawn = null } = {}) {
     if (!state) { onAfterDespawn?.(); return; }
     state.isMatchEnding = true;
-    state.placedThisTurn = true;
-    state.isMaterialSelected = false;
     const finishDespawn = () => {
+      state.placedThisTurn = true;
+      state.isMaterialSelected = false;
       if (global.BoardRippleRenderer) {
         global.BoardRippleRenderer.activeRipples = [];
         global.BoardRippleRenderer.activeTileAnims?.clear?.();
         global.BoardRippleRenderer.materialSpawnAnim = null;
       }
-      if (global.GameSettingsCanvas) global.GameSettingsCanvas.isMatchActive = false;
+      if (global.GameSettingsCanvas) {
+        global.GameSettingsCanvas.isMatchActive = false;
+        global.GameSettingsCanvas._isLeavingMatch = false;
+      }
       if (global.TurnManager) global.TurnManager.isEndingTurn = false;
       onAfterDespawn?.();
     };
@@ -352,10 +373,33 @@
     }
   };
 
+  proto.spawnBoardSilently = function(state, opts = {}) {
+    if (!state) return;
+    if (!global.BoardRenderer?.startMatchStartAnim) {
+      opts.onReady?.();
+      return;
+    }
+    const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);
+    state.isMatchStarting = true;
+    state.isMaterialSelected = false;
+    global.BoardRenderer.startMatchStartAnim(state.boardRadius || 6, {
+      silent: true,
+      objectsFadeSec: h3Sec,
+      onComplete: () => {
+        if (!state.matchStarted) return;
+        state.isMatchStarting = false;
+        opts.onReady?.();
+      }
+    });
+  };
+
   proto.despawnBoardSilently = function(state, onComplete = null) {
     if (!state?.matchStarted) {
+      if (global.GameSettingsCanvas) {
+        global.GameSettingsCanvas.isMatchActive = false;
+        global.GameSettingsCanvas._isLeavingMatch = false;
+      }
       state?.clearToPreMatch?.();
-      if (global.GameSettingsCanvas) global.GameSettingsCanvas.isMatchActive = false;
       onComplete?.();
       return;
     }

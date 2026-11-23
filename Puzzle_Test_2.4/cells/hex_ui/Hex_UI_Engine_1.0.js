@@ -339,21 +339,30 @@
 
     _shouldHideStatPods() {
       if (!this.baseLayerVisible) return true;
+      if (global.GameState?.isMatchEnding) return true;
       if (!this.studioOverlay || !this.studioOverlay.visible) return false;
       const isPopupOnly = this.studioOverlay.id === 'turn-confirm-scrim' || this.studioOverlay.id === 'turn-confirm-frame';
       if (isPopupOnly) return false;
-      if (this.studioOverlay === global.GameSettingsCanvas?.containerNode) return !!global.GameSettingsCanvas.active;
+      if (this.studioOverlay === global.GameSettingsCanvas?.containerNode) {
+        return !!(global.GameSettingsCanvas.active || global.GameSettingsCanvas._isLeavingMatch);
+      }
       if (this.studioOverlay === global.SigilNookCanvas?.containerNode) return global.SigilNookCanvas.stage !== 'closed';
       if (this.studioOverlay === global.StatCanvas?.containerNode) return !!global.StatCanvas.active;
       return true;
     }
 
     _syncPodFade() {
+      const tweens = global.TweenOrchestrator;
+      if (global.GameState?.isMatchEnding && global.BoardRenderer?.matchEndAnim) {
+        tweens?.cancel?.('stat_pods_fade');
+        this._podsTargetHidden = true;
+        this._podFadeAlpha = Math.min(this._podFadeAlpha, global.BoardRenderer.getMatchEndObjectsAlpha());
+        return;
+      }
       const shouldHide = this._shouldHideStatPods();
       if (shouldHide === this._podsTargetHidden) return;
       this._podsTargetHidden = shouldHide;
       const targetAlpha = shouldHide ? 0.0 : 1.0;
-      const tweens = global.TweenOrchestrator;
       if (!tweens?.add) {
         this._podFadeAlpha = targetAlpha;
         return;

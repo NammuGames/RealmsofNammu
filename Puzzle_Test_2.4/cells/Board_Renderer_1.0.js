@@ -192,21 +192,25 @@
       };
     }
 
-    startMatchStartAnim(boardR, onComplete = null) {
+    startMatchStartAnim(boardR, optionsOrCb = null) {
       this.matchEndAnim = null;
+      const opts = (typeof optionsOrCb === 'function') ? { onComplete: optionsOrCb } : (optionsOrCb || {});
       const { beatSec, tileSpawnSec, ringSpacingSec, boundaryFadeSec } = this._getMatchAnimTimings();
       const totalRingsTime = Math.max(0, boardR) * ringSpacingSec + tileSpawnSec;
+      const objectsFadeSec = Math.max(0, Number(opts.objectsFadeSec) || 0);
       this.matchStartAnim = {
         boardR,
         elapsed: 0,
         tileSpawnSec,
         ringSpacingSec,
         boundaryFadeSec,
+        objectsFadeSec,
         gsfDelaySec: beatSec,
         gsfPlayed: false,
+        silent: !!opts.silent,
         totalRingsTime,
-        totalDuration: totalRingsTime + boundaryFadeSec,
-        onComplete
+        totalDuration: totalRingsTime + boundaryFadeSec + objectsFadeSec,
+        onComplete: opts.onComplete || null
       };
       this.bgKey = '';
     }
@@ -272,6 +276,14 @@
       return this._evalOvershootCurve(1.0 - u);
     }
 
+    getMatchStartObjectsAlpha() {
+      const anim = this.matchStartAnim;
+      if (!anim || !anim.objectsFadeSec || anim.objectsFadeSec <= 0) return 1.0;
+      const fadeStart = anim.totalRingsTime + anim.boundaryFadeSec;
+      if (anim.elapsed <= fadeStart) return 0.0;
+      return Math.min(1.0, (anim.elapsed - fadeStart) / Math.max(0.016, anim.objectsFadeSec));
+    }
+
     getMatchEndObjectsAlpha() {
       const anim = this.matchEndAnim;
       if (!anim) return 1.0;
@@ -316,7 +328,7 @@
       anim.elapsed += Math.min(0.1, Math.max(0, dt));
       if (!anim.gsfPlayed && anim.elapsed >= (anim.gsfDelaySec || 0)) {
         anim.gsfPlayed = true;
-        global.AudioSynth?.playGameStartFinish?.();
+        if (!anim.silent) global.AudioSynth?.playGameStartFinish?.();
       }
 
       ctx.save();
@@ -336,7 +348,10 @@
         const cb = anim.onComplete;
         this.matchStartAnim = null;
         this.bgKey = '';
-        if (typeof cb === 'function') cb();
+        if (typeof cb === 'function') {
+          if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => cb());
+          else cb();
+        }
       }
       return true;
     }
@@ -344,6 +359,7 @@
     renderMatchEndBackground(ctx, state, math, boardR, cState, bz, dt) {
       const anim = this.matchEndAnim;
       if (!anim) return false;
+      if (anim.completed) return true;
       anim.elapsed += Math.min(0.1, Math.max(0, dt));
       if (!anim.soundPlayed && anim.elapsed >= anim.soundDelaySec) {
         anim.soundPlayed = true;
@@ -370,10 +386,17 @@
       ctx.restore();
 
       if (anim.elapsed >= anim.totalDuration) {
+        anim.completed = true;
         const cb = anim.onComplete;
-        this.matchEndAnim = null;
-        this.bgKey = '';
-        if (typeof cb === 'function') cb();
+        const finishAnim = () => {
+          if (typeof cb === 'function') cb();
+          if (this.matchEndAnim === anim) {
+            this.matchEndAnim = null;
+            this.bgKey = '';
+          }
+        };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(finishAnim);
+        else finishAnim();
       }
       return true;
     }

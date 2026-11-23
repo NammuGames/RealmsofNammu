@@ -55,6 +55,7 @@
     containerNode.alpha = 1.0;
     containerNode.contentAlpha = 0.0;
     if (typeof containerNode.invalidateCache === 'function') containerNode.invalidateCache();
+    containerNode.updateTransforms?.();
 
     // Stage 1: Empty Bezel Chassis Expansion (with concurrent parent fade if options.concurrentFade)
     this.add({

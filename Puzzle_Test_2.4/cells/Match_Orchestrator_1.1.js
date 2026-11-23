@@ -325,51 +325,78 @@
     return { wrappedNewRound: true, matchEnded: false };
   };
 
-  proto.triggerMatchEndSequence = function(state, isVictory = false) {
-    if (!state) return;
+  proto._runBoardDespawnAnim = function(state, { silent = false, useGSF = false, onAfterDespawn = null } = {}) {
+    if (!state) { onAfterDespawn?.(); return; }
     state.isMatchEnding = true;
     state.placedThisTurn = true;
     state.isMaterialSelected = false;
-
-    const finishEnd = () => {
-      state.matchStarted = false;
-      state.isMatchEnding = false;
-      state.placedThisTurn = false;
-      state.isMaterialSelected = false;
-      state.activeDamageTiles = [];
-      state.archZones = [];
-      state.fortifiedTiles?.clear?.();
-      state.inSigilStage = false;
-      state.activeMaterialMod = null;
-      state.materialsTray = [];
-      state.spellbook = [];
-      state.board?.clear?.();
-      global.ComponentDisease?.reset?.();
-      global.UndoManager?.clearTurnHistory?.();
+    const finishDespawn = () => {
       if (global.BoardRippleRenderer) {
         global.BoardRippleRenderer.activeRipples = [];
         global.BoardRippleRenderer.activeTileAnims?.clear?.();
         global.BoardRippleRenderer.materialSpawnAnim = null;
       }
-      state.evaluateSigils?.();
       if (global.GameSettingsCanvas) global.GameSettingsCanvas.isMatchActive = false;
       if (global.TurnManager) global.TurnManager.isEndingTurn = false;
-      state.syncUI();
-      global.UICardsDeck?.syncMaterialsQueueColumn?.();
-      global.UICardsDeck?.syncSpellbookColumn?.();
-      global.BoardRenderer?.render?.();
-      global.StatCanvas?.open?.();
+      onAfterDespawn?.();
     };
-
     if (global.BoardRenderer?.startMatchEndAnim) {
       global.BoardRenderer.startMatchEndAnim(state.boardRadius || 6, {
-        useGSF: !!isVictory,
-        onComplete: finishEnd
+        useGSF: !!useGSF,
+        silent: !!silent,
+        onComplete: finishDespawn
       });
       global.BoardRenderer?.render?.();
     } else {
-      finishEnd();
+      finishDespawn();
     }
+  };
+
+  proto.despawnBoardSilently = function(state, onComplete = null) {
+    if (!state?.matchStarted) {
+      state?.clearToPreMatch?.();
+      if (global.GameSettingsCanvas) global.GameSettingsCanvas.isMatchActive = false;
+      onComplete?.();
+      return;
+    }
+    this._runBoardDespawnAnim(state, {
+      silent: true,
+      useGSF: false,
+      onAfterDespawn: () => {
+        state.clearToPreMatch?.();
+        onComplete?.();
+      }
+    });
+  };
+
+  proto.triggerMatchEndSequence = function(state, isVictory = false) {
+    if (!state) return;
+    this._runBoardDespawnAnim(state, {
+      silent: false,
+      useGSF: !!isVictory,
+      onAfterDespawn: () => {
+        state.matchStarted = false;
+        state.isMatchEnding = false;
+        state.placedThisTurn = false;
+        state.isMaterialSelected = false;
+        state.activeDamageTiles = [];
+        state.archZones = [];
+        state.fortifiedTiles?.clear?.();
+        state.inSigilStage = false;
+        state.activeMaterialMod = null;
+        state.materialsTray = [];
+        state.spellbook = [];
+        state.board?.clear?.();
+        global.ComponentDisease?.reset?.();
+        global.UndoManager?.clearTurnHistory?.();
+        state.evaluateSigils?.();
+        state.syncUI();
+        global.UICardsDeck?.syncMaterialsQueueColumn?.();
+        global.UICardsDeck?.syncSpellbookColumn?.();
+        global.BoardRenderer?.render?.();
+        global.StatCanvas?.open?.();
+      }
+    });
   };
 
   // Expose player themes

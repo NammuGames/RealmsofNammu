@@ -429,6 +429,13 @@
       global.ComponentDisease?.reset?.();
       global.UndoManager?.clearTurnHistory?.();
       global.TurnLogManager?.reset?.();
+      global.TurnLogPlayer?.reset?.();
+      global.POVManager?.reset?.();
+      if (global.BoardRippleRenderer) {
+        global.BoardRippleRenderer.activeRipples = [];
+        global.BoardRippleRenderer.activeTileAnims?.clear?.();
+        global.BoardRippleRenderer.materialSpawnAnim = null;
+      }
       this.evaluateSigils();
       global.UISidebarDeck?.closeMaterialsColumn?.(true);
       this.syncUI();

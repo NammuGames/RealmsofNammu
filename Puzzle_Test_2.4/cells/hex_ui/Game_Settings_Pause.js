@@ -34,18 +34,36 @@
     const mc = global.MemoryCardManager;
     global.UISidebarDeck?.closeMaterialsColumn?.(true);
 
+    // Fully un-arm match/room state so returning to Root Menu presents a clean unjoined state
+    this.selectedSavedMatchId = null;
+    this.clearArmedDraft?.();
+    if (this.config) this.config.lobbyMode = 'Local';
+    if (global.RoomStatCanvas) {
+      global.RoomStatCanvas.savedMatch = null;
+      global.RoomStatCanvas.mode = 'lobby';
+    }
+
     this.close(async () => {
       if (state?.matchStarted) {
         mc?.saveActivePuzzleMatch?.();
       }
-      if (net?.isConnected?.()) {
-        if (net.role === 'host') await net.closeRoomAndSave();
-        else await net.leaveRoom();
+      if (mc) mc.activeMatchId = null;
+      if (net && net.role !== 'offline') {
+        if (net.role === 'host') await net.closeRoomAndSave?.();
+        else await net.leaveRoom?.();
       }
-      state?.clearToPreMatch?.();
       this.isMatchActive = false;
-      this.openSetupMenu('btn-nav-menu', { silent: true });
-      global.GameState?.showToast?.('💾 Match saved — returned to Game Menu');
+      const openCleanMenu = () => {
+        this.isMatchActive = false;
+        this.openSetupMenu('btn-nav-menu', { silent: true });
+        global.GameState?.showToast?.('💾 Match saved — returned to Game Menu');
+      };
+      if (global.MatchOrchestrator?.despawnBoardSilently) {
+        global.MatchOrchestrator.despawnBoardSilently(state, openCleanMenu);
+      } else {
+        state?.clearToPreMatch?.();
+        openCleanMenu();
+      }
     });
   };
 

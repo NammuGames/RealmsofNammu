@@ -43,7 +43,7 @@
     const mc = global.MemoryCardManager;
     const net = global.NetworkP2PManager;
     const isGuestWaiting = !isStartedSave && !!(net?.role === 'guest' && net?.isConnected?.());
-    const guestCanEnter = !(isStartedSave && armedSave?.matchType === 'Guest' && net && !net.isHostOnline?.());
+    const guestCanEnter = !(isStartedSave && armedSave?.matchType === 'Guest' && (!net || net.role !== 'guest' || !net.isHostOnline?.()));
 
     const levelTitle = isStartedSave
       ? (armedSave.presetName || armedSave.matchConfig?.presetName || curPreset.name)

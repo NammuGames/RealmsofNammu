@@ -142,6 +142,7 @@
     }
 
     if (msg.type === 'LOG_SYNC_BATCH' && this.role === 'guest') {
+      if (this._logCatchUpTimer) { clearTimeout(this._logCatchUpTimer); this._logCatchUpTimer = null; }
       if (Array.isArray(msg.seatOwners) && msg.seatOwners.length > 0) {
         this.seatOwners = msg.seatOwners.slice();
       }
@@ -150,6 +151,10 @@
       const added = lm?.enqueueIncomingEntries?.(msg.entries || []) || 0;
       if (added > 0) {
         if (msg.targetSnap && lp) lp.deferredTurnSnap = msg.targetSnap;
+        if (global.GameState) {
+          global.GameState.placedThisTurn = true;
+          global.GameState.isMaterialSelected = false;
+        }
         global.GameState?.syncUI?.();
         global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
         global.BoardRenderer?.render?.();
@@ -202,10 +207,20 @@
     });
   };
 
-  proto.requestLogCatchUp = function() {
+  proto.requestLogCatchUp = function(retriesLeft = 3) {
     if (this.role !== 'guest' || !this.isConnected()) return false;
+    if (this._logCatchUpTimer) { clearTimeout(this._logCatchUpTimer); this._logCatchUpTimer = null; }
     const afterSeq = global.TurnLogManager?.lastViewedSeq || 0;
-    return this._publishRoom?.({ type: 'LOG_SYNC_REQ', afterSeq }, this.hostPeerId || '*');
+    const sent = this._publishRoom?.({ type: 'LOG_SYNC_REQ', afterSeq }, this.hostPeerId || '*');
+    if (retriesLeft > 0) {
+      this._logCatchUpTimer = setTimeout(() => {
+        this._logCatchUpTimer = null;
+        if (this.role === 'guest' && this.isConnected() && global.TurnLogPlayer?.deferredTurnSnap && !global.TurnLogManager?.hasPendingEntries?.()) {
+          this.requestLogCatchUp(retriesLeft - 1);
+        }
+      }, 1800);
+    }
+    return sent;
   };
 
   proto.syncFullState = function(reason = 'TURN') {
@@ -309,8 +324,14 @@
       if (global.RoomStatCanvas?.isOpen?.()) {
         global.RoomStatCanvas.close({ returnToMenu: false, immediate: true, silent: true });
       }
-      if (!global.GameState?.matchStarted && savedLocal && !savedLocal.isLobbyPlaceholder) {
-        global.MemoryCardManager?.restorePuzzleState?.({ ...savedLocal, turnPhase: 'MID_TURN' });
+      if (!global.GameState?.matchStarted) {
+        const preLogBase = (savedLocal && !savedLocal.isLobbyPlaceholder)
+          ? { ...savedLocal, turnPhase: 'MID_TURN', placedThisTurn: true, isMaterialSelected: false }
+          : { ...snap, boardTiles: [], activeDamageTiles: [], disease: null, turnPhase: 'MID_TURN', placedThisTurn: true, isMaterialSelected: false };
+        global.MemoryCardManager?.restorePuzzleState?.(preLogBase);
+      } else if (global.GameState) {
+        global.GameState.placedThisTurn = true;
+        global.GameState.isMaterialSelected = false;
       }
       if (lp) lp.deferredTurnSnap = snap;
       this.requestLogCatchUp();

@@ -332,7 +332,7 @@
 
     if (armedSave && armedSave.matchType !== 'Draft') {
       if (armedSave.matchType === 'Guest') {
-        if (net && !net.isHostOnline?.()) {
+        if (!net || net.role !== 'guest' || !net.isHostOnline?.()) {
           global.AudioSynth?.playCancel?.();
           global.GameState?.showToast?.('⏳ Waiting for Host to come online...');
           return;

@@ -310,6 +310,7 @@
     async _cleanupTransportOnly() {
       this._stopHeartbeat();
       if (this._pendingSync) { clearInterval(this._pendingSync.timer); this._pendingSync = null; }
+      if (this._logCatchUpTimer) { clearTimeout(this._logCatchUpTimer); this._logCatchUpTimer = null; }
       this._lastRemoteSyncKey = '';
       this.connections.clear();
       this.onlinePeerIds.clear();

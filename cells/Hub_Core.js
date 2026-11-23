@@ -39,7 +39,18 @@
       this.crownProgress = 0.0;
       this.ribbonProgress = 0.0;
       this.crownOpen = false;
+      this.rootTextOffsetY = 3;
       this.metrics = { rootR: 112, branchR: 84, rootCrownY: 96, spreadX: 225, sideY: -78, topY: -162 };
+    }
+
+    getRootTextOffsetY() { return this.rootTextOffsetY ?? 3; }
+
+    setRootTextOffsetY(y) {
+      const val = Number.isFinite(Number(y)) ? Number(y) : 0;
+      this.rootTextOffsetY = Math.max(-80, Math.min(80, val));
+      const txt = this.rootNode?.getTrait?.('text');
+      if (txt) txt.offsetY = this.rootTextOffsetY;
+      return this.rootTextOffsetY;
     }
 
     /**
@@ -180,6 +191,7 @@
       rootNode.isSidebarButton = true;
       rootNode.addTrait(new TextTrait({
         title: ['Nammu', 'Games'], titleSize: 42, lineSpacing: 46,
+        offsetY: this.rootTextOffsetY || 0,
         titleColor: '#f8fafc', fontFamily: FONT_SCI_FAE
       }));
       rootNode.addTrait(new ButtonTrait({ hoverGlowColor: '#ff9214', soundClick: false, onClick: () => self._onRootClicked() }));

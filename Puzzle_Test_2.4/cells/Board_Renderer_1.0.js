@@ -227,6 +227,7 @@
         soundDelaySec: objectsFadeSec + beatSec,
         soundPlayed: false,
         useGSF: !!options.useGSF,
+        silent: !!options.silent,
         totalDuration: objectsFadeSec + boundaryFadeSec + despawnRingsDur,
         onComplete: options.onComplete || null
       };
@@ -346,8 +347,10 @@
       anim.elapsed += Math.min(0.1, Math.max(0, dt));
       if (!anim.soundPlayed && anim.elapsed >= anim.soundDelaySec) {
         anim.soundPlayed = true;
-        if (anim.useGSF) global.AudioSynth?.playGameStartFinish?.();
-        else global.AudioSynth?.playGameOver?.();
+        if (!anim.silent) {
+          if (anim.useGSF) global.AudioSynth?.playGameStartFinish?.();
+          else global.AudioSynth?.playGameOver?.();
+        }
       }
       // During the 3 H-Beat object fade-out, static tiles + boundaries stay full strength via bgCanvas
       if (anim.elapsed < anim.objectsFadeSec) return false;

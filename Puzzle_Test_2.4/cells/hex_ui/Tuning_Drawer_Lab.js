@@ -272,6 +272,21 @@
         });
       }
       this.initHubPreviewControls();
+      this.initHubRootControls();
+    }
+
+    initHubRootControls() {
+      const slY = document.getElementById('slider-hub-root-text-y');
+      const valY = document.getElementById('val-hub-root-text-y');
+      if (!slY) return;
+      const curY = global.HubCore?.getRootTextOffsetY?.() ?? 3;
+      slY.value = curY;
+      if (valY) valY.textContent = `${curY} px`;
+      slY.addEventListener('input', () => {
+        const v = parseInt(slY.value, 10) || 0;
+        if (valY) valY.textContent = `${v} px`;
+        global.HubCore?.setRootTextOffsetY?.(v);
+      });
     }
 
     initHubPreviewControls() {
@@ -308,7 +323,10 @@
         staging()?.setPreviewConfig?.({ instructText: inpInst.value });
       });
       if (btnCopy) btnCopy.addEventListener('click', () => {
-        const cfg = staging()?.getPreviewConfig?.() || {};
+        const cfg = Object.assign(
+          { rootTextOffsetY: global.HubCore?.getRootTextOffsetY?.() ?? 3 },
+          staging()?.getPreviewConfig?.() || {}
+        );
         this._copyTextWithFeedback(JSON.stringify(cfg, null, 2), btnCopy, '📋 Hub Preview config copied as JSON!');
         if (this.audio?.playClick) this.audio.playClick();
       });

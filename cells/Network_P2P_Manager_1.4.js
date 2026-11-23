@@ -179,9 +179,16 @@
     this.searchStatus = 'Host Offline — Waiting...';
     global.GameState?.showToast?.(toastMsg);
 
-    // Close StatCanvas or Pause Menu if open, then kick Guest back to RoomStatCanvas
-    if (global.StatCanvas?.isOpen?.()) {
-      global.StatCanvas.close?.({ immediate: true, silent: true });
+    // Save active Guest snapshot, close Pause/Stat/Confirm overlays, and silently despawn the Board
+    if (global.GameState?.matchStarted) {
+      global.MemoryCardManager?.saveActivePuzzleMatch?.();
+    }
+    if (global.TurnConfirmPopup?.isOpen?.()) global.TurnConfirmPopup.close?.();
+    if (global.StatCanvas?.isOpen?.()) global.StatCanvas.close?.({ immediate: true, silent: true });
+    if (global.SigilNookCanvas?.isOpen?.()) global.SigilNookCanvas.close?.({ silent: true });
+    if (global.GameSettingsCanvas?.isOpen?.()) global.GameSettingsCanvas.close?.();
+    if (global.GameState?.matchStarted) {
+      global.MatchOrchestrator?.despawnBoardSilently?.(global.GameState);
     }
     if (global.RoomStatCanvas) {
       if (!global.RoomStatCanvas.isOpen?.()) {

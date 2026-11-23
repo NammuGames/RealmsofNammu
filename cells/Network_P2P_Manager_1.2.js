@@ -23,29 +23,18 @@
     if (!msg || !msg.type) return;
 
     if (msg.type === 'HELLO' && this.role === 'host') {
-      const seatCount = Math.max(1, Math.min(6, msg.localPlayerCount || 1));
-      const wasConnected = this.connections.has(fromPeerId);
-      this.connections.set(fromPeerId, { peer: fromPeerId, open: true, lastSeen: Date.now() });
-      const existing = this.peerMeta.get(fromPeerId);
-      const seatIdx = existing?.seatIndex ?? this.seatOwners.length;
-      this.peerMeta.set(fromPeerId, { name: msg.name || `Player ${seatIdx + 1}`, seatIndex: seatIdx, localPlayerCount: seatCount });
-      this._rebuildSeatRoster();
-      this._broadcastRoster();
-      if (!wasConnected && global.GameState?.matchStarted) {
-        const snap = global.MemoryCardManager?.capturePuzzleState?.();
-        const lm = global.TurnLogManager;
-        const hostMaxSeq = lm?.hostLog?.length ? lm.hostLog[lm.hostLog.length - 1].seq : 0;
-        if (snap) {
-          const netSnap = snap.turnLog ? { ...snap, turnLog: undefined } : snap;
-          this._publishRoom?.({
-            type: 'STATE_SYNC', reason: 'JOIN', hostMaxSeq,
-            seatOwners: this.seatOwners?.length ? this.seatOwners : undefined,
-            snap: netSnap
-          }, fromPeerId);
-        }
-      }
-      this._updateDrawerUI();
-      this._notifyLobbyUpdate();
+      this._handleHostHello?.(fromPeerId, msg);
+      return;
+    }
+
+    if (msg.type === 'ROOM_LOCK_STATE' && this.role === 'guest') {
+      this.roomLocked = !!msg.roomLocked;
+      this._notifyLobbyUpdate?.();
+      return;
+    }
+
+    if (msg.type === 'JOIN_REJECTED' && this.role === 'guest') {
+      this._handleJoinRejected?.(msg);
       return;
     }
 
@@ -53,25 +42,25 @@
       if (this.role === 'guest') {
         this._onGuestConnectedToHost?.(msg.hostPeerId || fromPeerId);
         const listed = Array.isArray(msg.seatOwners) && msg.seatOwners.includes(this.myPeerId);
-        if (!listed) this._sendHello?.();
+        if (!listed && !msg.roomLocked && !msg.matchStarted) this._sendHello?.();
       }
       this.roomCode = msg.roomCode || this.roomCode;
-      if (msg.matchName) this.matchName = msg.matchName;
+      if (typeof msg.matchName === 'string') this.matchName = msg.matchName;
       if (msg.presetName) this.hostPresetName = msg.presetName;
       if (typeof msg.playerCount === 'number') this.hostPlayerCount = msg.playerCount;
       if (msg.matchConfig) this.hostMatchConfig = msg.matchConfig;
+      if (typeof msg.roomLocked === 'boolean') this.roomLocked = msg.roomLocked;
+      if (typeof msg.matchStarted === 'boolean') this.matchStarted = msg.matchStarted;
       this.hostPeerId = msg.hostPeerId || this.hostPeerId;
-      this.seatOwners = msg.seatOwners || [];
+      if (Array.isArray(msg.seatOwners)) this.seatOwners = msg.seatOwners.slice();
       if (Array.isArray(msg.seats)) this.roomSeats = msg.seats;
       if (Array.isArray(msg.peers)) this.peerMeta = new Map(msg.peers);
-      if (this.role === 'guest' && this.roomCode) {
-        global.MemoryCardManager?.saveJoinedLobbyMatch?.({
-          roomCode: this.roomCode,
-          matchName: this.matchName,
-          presetName: this.hostPresetName,
-          playerCount: this.hostPlayerCount,
-          matchConfig: this.hostMatchConfig
-        });
+      if (Array.isArray(msg.onlinePeerIds)) {
+        this.onlinePeerIds = new Set(msg.onlinePeerIds);
+        if (this.role === 'guest') {
+          this.onlinePeerIds.add(this.myPeerId);
+          if (this.hostPeerId && this.hostOnline) this.onlinePeerIds.add(this.hostPeerId);
+        }
       }
       this._updateDrawerUI();
       this._notifyLobbyUpdate();
@@ -95,8 +84,17 @@
     }
 
     if (msg.type === 'ROOM_CLOSING') {
-      global.GameState?.showToast?.('💾 Host saved and closed the room.');
-      this.leaveRoom();
+      if (this.role === 'guest' && this._isMatchActive()) {
+        this.hostOnline = false;
+        if (this.hostPeerId) {
+          this.connections.delete(this.hostPeerId);
+          this.onlinePeerIds.delete(this.hostPeerId);
+        }
+        this._handleHostDroppedInMatch?.('💾 Host saved and went offline.');
+      } else {
+        global.GameState?.showToast?.('💾 Host saved and closed the room.');
+        this.leaveRoom();
+      }
       return;
     }
 
@@ -262,8 +260,15 @@
   };
 
   proto._applyRemoteStateSync = async function(snap, logEntry = null, reason = 'TURN', hostMaxSeq = 0, seatOwners = null) {
+    this.matchStarted = true;
+    this.roomLocked = true;
     if (this.role === 'guest' && Array.isArray(seatOwners) && seatOwners.length > 0) {
       this.seatOwners = seatOwners.slice();
+    }
+    if (this.role === 'guest' && this._awaitingEnterMatch && (reason === 'JOIN' || reason === 'MATCH_RESUME')) {
+      this.pendingMatchStartSnap = { snap, logEntry, reason, hostMaxSeq, seatOwners };
+      this._notifyLobbyUpdate?.();
+      return;
     }
     if (global.HubGameLoader?.activeGameId !== 'puzzle') {
       await global.HubGameLoader?.launchGame?.('puzzle');

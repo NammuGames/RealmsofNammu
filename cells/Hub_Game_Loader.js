@@ -15,6 +15,8 @@
       this.games = new Map();
       this.loadedScripts = new Map();
       this._preloadPromises = new Map();
+      this._preparePromises = new Map();
+      this.preparedGames = new Set();
       this._progressSubs = new Map();
       this.activeGameId = null;
       this.isLoading = false;
@@ -103,22 +105,40 @@
     }
 
     /**
-     * Downloads scripts in parallel (via async=false) while preserving strict in-order execution.
+     * Downloads and executes scripts in frame-budgeted chunks so the 60Hz render loop
+     * never stalls during Step 0 while preserving strict in-order execution.
      * @param {Array<string>} urls
      * @param {Function} [onProgress]
+     * @param {Object} [opts]
      */
-    async loadScriptSequence(urls, onProgress = null) {
+    async loadScriptSequence(urls, onProgress = null, opts = {}) {
       const total = urls.length;
+      if (total === 0) {
+        if (typeof onProgress === 'function') onProgress(1, 1);
+        return;
+      }
+      const chunkSize = Math.max(1, Number(opts.chunkSize) || 4);
+      const timeSliced = opts.timeSliced !== false;
+      const yieldFrame = () => (typeof requestAnimationFrame === 'function'
+        ? new Promise((r) => requestAnimationFrame(r))
+        : Promise.resolve());
+
       let done = 0;
-      const promises = urls.map((u) => {
-        const isCdn = /^https?:\/\//i.test(u);
-        return this.loadScript(u, isCdn).then((res) => {
-          done++;
-          if (typeof onProgress === 'function') onProgress(done, total);
-          return res;
+      for (let i = 0; i < total; i += chunkSize) {
+        const batch = urls.slice(i, i + chunkSize);
+        const batchPromises = batch.map((u) => {
+          const isCdn = /^https?:\/\//i.test(u);
+          return this.loadScript(u, isCdn).then((res) => {
+            done++;
+            if (typeof onProgress === 'function') onProgress(done, total);
+            return res;
+          });
         });
-      });
-      await Promise.all(promises);
+        await Promise.all(batchPromises);
+        if (timeSliced && i + chunkSize < total) {
+          await yieldFrame();
+        }
+      }
     }
 
     /**
@@ -171,6 +191,81 @@
     }
 
     /**
+     * Preloads and silently mounts a game into the hidden Base Macro-Layer without activating it.
+     * Reports unified real-time progress (0-80% scripts, 80-100% yielded mount phases) via opts.onPercent.
+     * @param {string} id
+     * @param {Object} [opts]
+     * @returns {Promise<boolean>}
+     */
+    prepareGame(id, opts = {}) {
+      const meta = this.games.get(id);
+      if (!meta) return Promise.resolve(false);
+      if (this.preparedGames.has(id) || this.activeGameId === id) {
+        opts.onPercent?.(100);
+        opts.onProgress?.(1, 1);
+        return Promise.resolve(true);
+      }
+      const emitPct = (pct) => {
+        const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+        if (typeof opts.onPercent === 'function') opts.onPercent(clamped);
+      };
+      if (opts.onProgress) {
+        const subs = this._progressSubs.get(id) || [];
+        subs.push(opts.onProgress);
+        this._progressSubs.set(id, subs);
+      }
+      if (this._preparePromises.has(id)) return this._preparePromises.get(id);
+
+      const p = (async () => {
+        const loaded = await this.preloadGame(id, (done, total) => {
+          emitPct((done / Math.max(1, total)) * 80);
+        });
+        const entry = global.GAME_ENTRIES?.[id];
+        if (!loaded || !entry || typeof entry.mount !== 'function') {
+          throw new Error(`Game entry "${id}" unavailable after preload.`);
+        }
+        const engine = this.hubContext?.engine || global.HexUIEngine;
+        if (engine) {
+          engine.baseLayerVisible = false;
+          engine.baseLayerInteractive = false;
+          engine.hudFrameAlpha = 0.0;
+          engine.forceGhostSidebars = true;
+        }
+        await entry.mount(this.hubContext, meta, Object.assign({
+          skipAutoMenu: true,
+          invisibleMount: true,
+          preserveOverlay: true,
+          timeSliced: true,
+          onMountProgress: (step, totalSteps) => {
+            emitPct(80 + (step / Math.max(1, totalSteps)) * 20);
+          }
+        }, opts));
+        emitPct(100);
+        this.preparedGames.add(id);
+        return true;
+      })().catch((err) => {
+        console.error(`[Hub_Game_Loader] Background prepare failed for "${id}":`, err);
+        return false;
+      }).finally(() => {
+        this._preparePromises.delete(id);
+      });
+
+      this._preparePromises.set(id, p);
+      return p;
+    }
+
+    /** Marks a silently prepared game as the active game when the user commits launch. */
+    activatePreparedGame(id) {
+      const meta = this.games.get(id);
+      if (!meta) return false;
+      this.activeGameId = id;
+      if (typeof this.onGameMounted === 'function') {
+        this.onGameMounted(id, meta);
+      }
+      return true;
+    }
+
+    /**
      * Loads and mounts a registered game on demand over the running Hub runtime.
      * @param {string} id
      * @param {Object} [opts]
@@ -191,16 +286,30 @@
           await this.unloadCurrentGame({ silentReturn: true });
         }
 
-        const loaded = await this.preloadGame(id, opts.onProgress);
-        const entry = global.GAME_ENTRIES?.[id];
-        if (!loaded || !entry || typeof entry.mount !== 'function') {
-          throw new Error(`Game entry "${id}" unavailable after preload.`);
+        const engine = this.hubContext?.engine || global.HexUIEngine;
+        const alreadyPrepared = this.preparedGames.has(id);
+        if (!alreadyPrepared) {
+          const loaded = await this.preloadGame(id, opts.onProgress);
+          const entry = global.GAME_ENTRIES?.[id];
+          if (!loaded || !entry || typeof entry.mount !== 'function') {
+            throw new Error(`Game entry "${id}" unavailable after preload.`);
+          }
+          if (typeof opts.onBeforeMount === 'function') {
+            await opts.onBeforeMount();
+          }
+          await entry.mount(this.hubContext, meta, opts);
+        } else if (!opts.invisibleMount && !opts.skipAutoMenu) {
+          global.GameSettingsCanvas?.openSetupMenu?.('btn-nav-menu', { silent: true });
         }
 
-        if (typeof opts.onBeforeMount === 'function') {
-          await opts.onBeforeMount();
+        if (engine && !opts.invisibleMount) {
+          engine.setForegroundOverlay?.(null);
+          engine.baseLayerVisible = true;
+          engine.baseLayerAlpha = 1.0;
+          engine.hudFrameAlpha = 1.0;
+          engine.baseLayerInteractive = true;
+          engine.forceGhostSidebars = false;
         }
-        await entry.mount(this.hubContext, meta, opts);
         this.activeGameId = id;
         if (typeof this.onGameMounted === 'function') {
           this.onGameMounted(id, meta);
@@ -228,9 +337,9 @@
 
       const engine = this.hubContext?.engine || global.HexUIEngine;
       if (engine) {
-        if (engine.boardFrame) engine.boardFrame.visible = false;
-        if (engine.leftSidebar) engine.leftSidebar.visible = false;
-        if (engine.rightSidebar) engine.rightSidebar.visible = false;
+        engine.baseLayerVisible = false;
+        engine.baseLayerInteractive = false;
+        engine.forceGhostSidebars = false;
         engine.boardRenderDelegate = null;
       }
 
@@ -241,6 +350,7 @@
         ticker.deckSync = null;
       }
 
+      this.preparedGames.delete(id);
       this.activeGameId = null;
       if (!opts.silentReturn && typeof this.onReturnToHub === 'function') {
         this.onReturnToHub();

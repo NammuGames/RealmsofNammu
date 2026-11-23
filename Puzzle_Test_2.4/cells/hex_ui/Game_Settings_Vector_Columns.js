@@ -13,9 +13,12 @@
   if (!Proto) return;
 
   // ── 2. MATCH SETTINGS COLUMN ─────────────────────────────────────────────
-  Proto.renderMatchSettingsColumn = function(preset) {
+  Proto.renderMatchSettingsColumn = function(preset, forceReadOnly = false) {
     const self = this;
-    const curPreset = self.getActiveWorkingPreset ? self.getActiveWorkingPreset() : (preset || this.config.presets?.[0]);
+    const ro = !!(forceReadOnly || self.isMatchReadOnly?.());
+    const curPreset = ro
+      ? (preset || self.getReadOnlyLevelPreset?.() || this.config.presets?.[0])
+      : (self.getActiveWorkingPreset ? self.getActiveWorkingPreset() : (preset || this.config.presets?.[0]));
     if (!curPreset.match) curPreset.match = {};
     const cur = curPreset.match;
     if (!cur.materialComposition) cur.materialComposition = 'Even';
@@ -26,44 +29,52 @@
 
     this.renderColumn('Match Settings', true, [
       {
-        type: 'preset_name', id: 'material-composition', title: 'Material Composition', categoryIndexText: cur.materialComposition, color: '#10f000',
-        onClick: () => { cur.materialComposition = (cur.materialComposition === 'Random') ? 'Even' : 'Random'; self.buildScene(); }
+        type: 'preset_name', id: 'material-composition', title: 'Material Composition', categoryIndexText: cur.materialComposition,
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro, isLockedPurple: ro,
+        onClick: () => { if (ro) return; cur.materialComposition = (cur.materialComposition === 'Random') ? 'Even' : 'Random'; self.buildScene(); }
       },
       {
-        type: 'preset_name', id: 'luck-composition', title: 'Luck Composition', categoryIndexText: cur.luckComposition, color: '#10f000',
-        onClick: () => { cur.luckComposition = (cur.luckComposition === 'Random') ? 'Ether' : 'Random'; self.buildScene(); }
+        type: 'preset_name', id: 'luck-composition', title: 'Luck Composition', categoryIndexText: cur.luckComposition,
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro, isLockedPurple: ro,
+        onClick: () => { if (ro) return; cur.luckComposition = (cur.luckComposition === 'Random') ? 'Ether' : 'Random'; self.buildScene(); }
       },
       {
         type: 'half_stepper', id: 'starting-spells', title: 'Starting Spells',
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro,
         valText: `Pre-Spells: ${cur.startingSpells}`,
-        onDelta: (d) => { cur.startingSpells = Math.max(0, Math.min(3, (cur.startingSpells || 0) + d)); self.buildScene(); }
+        onDelta: (d) => { if (ro) return; cur.startingSpells = Math.max(0, Math.min(3, (cur.startingSpells || 0) + d)); self.buildScene(); }
       },
       {
         type: 'full_stepper', id: 'rounds', title: 'Rounds',
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro,
         valText: cur.isEndless ? '∞ Endless ∞' : `${cur.rounds} Rounds`,
-        isCenterClickable: true, isLocked: !!cur.isEndless,
-        onCenterClick: () => { cur.isEndless = !cur.isEndless; self.buildScene(); },
-        onDelta: (d) => { cur.isEndless = false; cur.rounds = Math.max(12, Math.min(432, cur.rounds + d)); self.buildScene(); }
+        isCenterClickable: !ro, isLocked: !!cur.isEndless,
+        onCenterClick: () => { if (ro) return; cur.isEndless = !cur.isEndless; self.buildScene(); },
+        onDelta: (d) => { if (ro) return; cur.isEndless = false; cur.rounds = Math.max(12, Math.min(432, cur.rounds + d)); self.buildScene(); }
       },
       {
         type: 'half_stepper', id: 'board-size', title: 'Board Size',
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro,
         valText: `Board Size: ${cur.boardRadius}`,
-        onDelta: (d) => { cur.boardRadius = Math.max(3, Math.min(12, cur.boardRadius + d)); self.buildScene(); }
+        onDelta: (d) => { if (ro) return; cur.boardRadius = Math.max(3, Math.min(12, cur.boardRadius + d)); self.buildScene(); }
       }
     ]);
   };
 
   // ── 3. DUAL-VECTOR COLUMN (LUCK & BLIGHT SETTINGS) ────────────────────────
-  Proto.renderDualVectorColumn = function(groupKey, preset) {
+  Proto.renderDualVectorColumn = function(groupKey, preset, forceReadOnly = false) {
     const self = this;
+    const ro = !!(forceReadOnly || self.isMatchReadOnly?.());
     const isLuck = groupKey === 'luck';
     const title = isLuck ? 'Luck Settings' : 'Blight Settings';
-    const colTheme = isLuck ? '#fbbf24' : '#f87171';
+    const colTheme = ro ? '#953ffd' : '#10f000';
     const vecAName = isLuck ? 'Play Field Luck' : 'Play Field Blight';
     const vecBName = isLuck ? 'Component Luck' : 'Component Blight';
     const itemTypeLabel = isLuck ? 'String' : 'Strain';
 
-    const curPreset = self.getActiveWorkingPreset ? self.getActiveWorkingPreset() : (preset || this.config.presets?.[0]);
+    const curPreset = ro
+      ? (preset || self.getReadOnlyLevelPreset?.() || this.config.presets?.[0])
+      : (self.getActiveWorkingPreset ? self.getActiveWorkingPreset() : (preset || this.config.presets?.[0]));
     if (!curPreset[groupKey]) curPreset[groupKey] = {};
     const cur = curPreset[groupKey];
     if (!Array.isArray(cur.playfieldItems)) cur.playfieldItems = [];
@@ -74,22 +85,24 @@
 
     this.renderColumn(title, true, [
       {
-        type: 'preview', id: `${groupKey}-vec-a`, title: vecAName, badges: playfieldBadges, color: colTheme,
+        type: 'preview', id: `${groupKey}-vec-a`, title: vecAName, badges: playfieldBadges, color: colTheme, isLockedPurple: ro,
         onClick: () => self.pushColumn(`${itemTypeLabel} Presets`, () => {
           self.renderPresetColumn(
             itemTypeLabel, cur.playfieldItems, cur.activePlayfieldIndex || 0,
-            (newIdx) => { cur.activePlayfieldIndex = newIdx; },
-            (clickedIdx) => self.pushPresetColumn(vecAName, itemTypeLabel, cur.playfieldItems, clickedIdx, null, () => self.renderVectorSubColumn(groupKey, 'playfield', curPreset))
+            (newIdx) => { if (!ro) cur.activePlayfieldIndex = newIdx; },
+            (clickedIdx) => self.pushPresetColumn(vecAName, itemTypeLabel, cur.playfieldItems, clickedIdx, null, () => self.renderVectorSubColumn(groupKey, 'playfield', curPreset, ro)),
+            ro
           );
         })
       },
       {
-        type: 'preview', id: `${groupKey}-vec-b`, title: vecBName, badges: materialBadges, color: colTheme,
+        type: 'preview', id: `${groupKey}-vec-b`, title: vecBName, badges: materialBadges, color: colTheme, isLockedPurple: ro,
         onClick: () => self.pushColumn(`${itemTypeLabel} Presets`, () => {
           self.renderPresetColumn(
             itemTypeLabel, cur.materialItems, cur.activeMaterialIndex || 0,
-            (newIdx) => { cur.activeMaterialIndex = newIdx; },
-            (clickedIdx) => self.pushPresetColumn(vecBName, itemTypeLabel, cur.materialItems, clickedIdx, null, () => self.renderVectorSubColumn(groupKey, 'material', curPreset))
+            (newIdx) => { if (!ro) cur.activeMaterialIndex = newIdx; },
+            (clickedIdx) => self.pushPresetColumn(vecBName, itemTypeLabel, cur.materialItems, clickedIdx, null, () => self.renderVectorSubColumn(groupKey, 'material', curPreset, ro)),
+            ro
           );
         })
       }
@@ -97,8 +110,9 @@
   };
 
   // ── 4. VECTOR SUB-COLUMN (PARAMETERS: START, INTERVAL, END, CHANCE, DUP) ─
-  Proto.renderVectorSubColumn = function(groupKey, vecType, preset) {
+  Proto.renderVectorSubColumn = function(groupKey, vecType, preset, forceReadOnly = false) {
     const self = this;
+    const ro = !!(forceReadOnly || self.isMatchReadOnly?.());
     const isLuck = groupKey === 'luck';
     const isPlayfield = vecType === 'playfield';
     const title = isPlayfield ? (isLuck ? 'Play Field Luck' : 'Play Field Blight') : (isLuck ? 'Component Luck' : 'Component Blight');
@@ -108,7 +122,9 @@
     let item = curDraft ? curDraft.draftItem : null;
     let itemList = curDraft ? curDraft.list : null;
     if (!item) {
-      const curPreset = self.getActiveWorkingPreset ? self.getActiveWorkingPreset() : (preset || this.config.presets?.[0]);
+      const curPreset = ro
+        ? (preset || self.getReadOnlyLevelPreset?.() || this.config.presets?.[0])
+        : (self.getActiveWorkingPreset ? self.getActiveWorkingPreset() : (preset || this.config.presets?.[0]));
       const curGroup = curPreset?.[groupKey] || {};
       itemList = isPlayfield ? curGroup.playfieldItems : curGroup.materialItems;
       if (Array.isArray(itemList)) {
@@ -124,8 +140,9 @@
 
     const items = [
       {
-        type: 'base', id: `${groupKey}-${vecType}-name`, title: item.name, color: '#10f000',
+        type: 'base', id: `${groupKey}-${vecType}-name`, title: item.name, color: ro ? '#953ffd' : '#10f000', isReadOnly: ro,
         onClick: () => {
+          if (ro) return;
           if (global.GameSettingsRenamePopup?.open) {
             global.GameSettingsRenamePopup.open(item, itemTypeLabel, parseInt(item.tagNumber, 10) || 1, () => {
               self.buildScene();
@@ -135,23 +152,27 @@
       },
       {
         type: 'full_stepper', id: 'turn-start', title: 'R Start', valText: `Start: R ${item.turnStart}`,
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro,
         isCenterGhost: isZeroChance,
-        onDelta: (d) => { item.turnStart = Math.max(0, Math.min(432, (item.turnStart || 0) + d)); self.buildScene(); }
+        onDelta: (d) => { if (ro) return; item.turnStart = Math.max(0, Math.min(432, (item.turnStart || 0) + d)); self.buildScene(); }
       },
       {
         type: 'full_stepper', id: 'turn-interval', title: 'R Interval', valText: `Every ${item.turnInterval} R`,
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro,
         isCenterGhost: isZeroChance,
-        onDelta: (d) => { item.turnInterval = Math.max(1, Math.min(144, (item.turnInterval || 1) + d)); self.buildScene(); }
+        onDelta: (d) => { if (ro) return; item.turnInterval = Math.max(1, Math.min(144, (item.turnInterval || 1) + d)); self.buildScene(); }
       },
       {
         type: 'full_stepper', id: 'turn-end', title: 'Lasts',
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro,
         valText: item.isEndOfMatch ? 'End of Match' : `Lasts: ${Math.max(1, item.turnEnd ?? 1)} R`,
-        isCenterClickable: true, isLocked: !!item.isEndOfMatch, isCenterGhost: isZeroChance,
-        onCenterClick: () => { item.isEndOfMatch = !item.isEndOfMatch; self.buildScene(); },
-        onDelta: (d) => { item.isEndOfMatch = false; item.turnEnd = Math.max(1, Math.min(432, (item.turnEnd || 1) + d)); self.buildScene(); }
+        isCenterClickable: !ro, isLocked: !!item.isEndOfMatch, isCenterGhost: isZeroChance,
+        onCenterClick: () => { if (ro) return; item.isEndOfMatch = !item.isEndOfMatch; self.buildScene(); },
+        onDelta: (d) => { if (ro) return; item.isEndOfMatch = false; item.turnEnd = Math.max(1, Math.min(432, (item.turnEnd || 1) + d)); self.buildScene(); }
       },
       {
         type: 'full_stepper', id: 'spawn-count', title: 'Spawns',
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro,
         valText: (() => {
           const maxSpawns = isPlayfield ? 24 : 4;
           const cnt = Math.max(1, Math.min(maxSpawns, item.spawnCount ?? 1));
@@ -159,6 +180,7 @@
         })(),
         isCenterGhost: isZeroChance,
         onDelta: (d) => {
+          if (ro) return;
           const maxSpawns = isPlayfield ? 24 : 4;
           item.spawnCount = Math.max(1, Math.min(maxSpawns, (item.spawnCount ?? 1) + d));
           self.buildScene();
@@ -166,14 +188,16 @@
       },
       {
         type: 'full_stepper', id: 'chance', title: isLuck ? 'Luck Chance' : 'Infection Chance', valText: `${item.chance}% ${isLuck ? 'Spawn' : 'Contagion'}`,
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro,
         isCenterGhost: isZeroChance,
-        onDelta: (d) => { item.chance = Math.max(0, Math.min(100, (item.chance || 0) + d)); self.buildScene(); }
+        onDelta: (d) => { if (ro) return; item.chance = Math.max(0, Math.min(100, (item.chance || 0) + d)); self.buildScene(); }
       },
       {
         type: 'full_stepper_double', id: 'dup-interval', title: 'Duplicate',
+        color: ro ? '#953ffd' : '#10f000', isReadOnly: ro,
         valText: !item.dupInterval ? 'Off' : `Every ${item.dupInterval} R`,
         isCenterGhost: isZeroChance,
-        onDelta: (d) => { item.dupInterval = Math.max(0, Math.min(144, (item.dupInterval || 0) + d)); self.buildScene(); }
+        onDelta: (d) => { if (ro) return; item.dupInterval = Math.max(0, Math.min(144, (item.dupInterval || 0) + d)); self.buildScene(); }
       }
     ];
 

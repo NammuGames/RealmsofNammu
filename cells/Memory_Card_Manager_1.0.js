@@ -1,7 +1,7 @@
 /**
- * @fileoverview cells/Memory_Card_Manager_1.0.js - Profile, Presets & Dirty-Flag Cache (Part 1/2)
+ * @fileoverview cells/Memory_Card_Manager_1.0.js - Profile, Presets & Dirty-Flag Cache (Part 1/3)
  * @description Manages unified same-origin localStorage keys, Saved/Unsaved dirty state tracking,
- * shorthand preset compression, permanent Room Code generation, and preset menu persistence.
+ * shorthand preset compression, globally unique match ### tag allocation, and preset persistence.
  * Strictly adheres to the 500-line hard cap and underscore naming conventions.
  */
 
@@ -14,8 +14,9 @@
     SAVES: 'nammu_mc_v1_saves',
     DIRTY: 'nammu_mc_v1_dirty'
   };
-  const MAX_SAVES = 12;
+  const MAX_SAVES = 48;
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const VALID_MATCH_TYPES = new Set(['Draft', 'Local', 'Host', 'Guest']);
 
   function safeParse(raw, fallback) {
     try { return raw ? JSON.parse(raw) : fallback; } catch { return fallback; }
@@ -23,6 +24,21 @@
 
   function deepClone(obj) {
     return JSON.parse(JSON.stringify(obj));
+  }
+
+  function formatTagNumber(num) {
+    const n = Math.max(1, Math.min(999, Number(num) || 1));
+    return String(n).padStart(3, '0');
+  }
+
+  function inferMatchType(entry) {
+    if (!entry || typeof entry !== 'object') return 'Local';
+    if (VALID_MATCH_TYPES.has(entry.matchType)) return entry.matchType;
+    if (entry.isDraft || entry.matchStarted === false) return 'Draft';
+    if (entry.lobbyMode === 'Online') {
+      return entry.roleBadge === 'Host' ? 'Host' : 'Guest';
+    }
+    return 'Local';
   }
 
   function makeCode(len = 4) {
@@ -152,9 +168,78 @@
       return makeCode(6);
     }
 
+    /** Allocates the lowest unused 3-digit tag ('001'..'999') globally across all local matches & drafts. */
+    allocateMatchTagNumber(savesMap = null) {
+      const saves = savesMap || safeParse(localStorage.getItem(KEYS.SAVES), {});
+      const used = new Set();
+      Object.values(saves).forEach((s) => {
+        if (s && typeof s.tagNumber === 'string' && /^\d{3}$/.test(s.tagNumber)) {
+          used.add(s.tagNumber);
+        }
+      });
+      for (let i = 1; i <= 999; i++) {
+        const tag = formatTagNumber(i);
+        if (!used.has(tag)) return tag;
+      }
+      return formatTagNumber(999);
+    }
+
+    /** Normalizes legacy/imported match entries so every card has valid matchType & unique ### tag. */
+    normalizeSavesMap(rawMap = {}, persistIfChanged = true) {
+      const src = rawMap && typeof rawMap === 'object' ? rawMap : {};
+      const usedTags = new Set();
+      let changed = false;
+
+      // Pass 1: preserve valid unique tags in oldest-first order for stability
+      const entries = Object.values(src).filter(e => e && typeof e === 'object' && e.id);
+      entries.sort((a, b) => (a.createdAt || a.updatedAt || 0) - (b.createdAt || b.updatedAt || 0));
+
+      for (const e of entries) {
+        const inferred = inferMatchType(e);
+        if (e.matchType !== inferred) { e.matchType = inferred; changed = true; }
+        const isDraft = inferred === 'Draft';
+        if (e.isDraft !== isDraft) { e.isDraft = isDraft; changed = true; }
+        const started = !isDraft;
+        if (e.matchStarted !== started) { e.matchStarted = started; changed = true; }
+        const displayName = e.matchName || e.name || (e.roomCode ? `Match ${e.roomCode}` : 'Unnamed Match');
+        if (e.matchName !== displayName || e.name !== displayName) {
+          e.matchName = displayName;
+          e.name = displayName;
+          changed = true;
+        }
+        if (typeof e.tagNumber === 'string' && /^\d{3}$/.test(e.tagNumber) && !usedTags.has(e.tagNumber)) {
+          usedTags.add(e.tagNumber);
+        } else {
+          e.tagNumber = null;
+          changed = true;
+        }
+      }
+
+      // Pass 2: assign lowest unused 001..999 to any missing/colliding tags
+      for (const e of entries) {
+        if (!e.tagNumber) {
+          let chosen = '999';
+          for (let i = 1; i <= 999; i++) {
+            const cand = formatTagNumber(i);
+            if (!usedTags.has(cand)) { chosen = cand; break; }
+          }
+          e.tagNumber = chosen;
+          usedTags.add(chosen);
+        }
+      }
+
+      if (changed && persistIfChanged) {
+        try { localStorage.setItem(KEYS.SAVES, JSON.stringify(src)); } catch {}
+      }
+      return src;
+    }
+
     // ── PROFILE & PRESETS CACHE ─────────────────────────────────────────────
     getProfile() {
-      return safeParse(localStorage.getItem(KEYS.PROFILE), { v: 1, name: 'Player 1', tag: '001', updatedAt: 0 });
+      const prof = safeParse(localStorage.getItem(KEYS.PROFILE), { v: 1, name: 'Player 1', tag: '001', updatedAt: 0 });
+      const dp = global.NetworkP2PManager?.getDevicePeerId?.();
+      if (dp && !prof.devicePeerId) prof.devicePeerId = dp;
+      return prof;
     }
 
     setProfile(updates = {}) {
@@ -216,6 +301,6 @@
     }
   }
 
-  MemoryCardManagerClass._helpers = { KEYS, MAX_SAVES, safeParse, deepClone };
+  MemoryCardManagerClass._helpers = { KEYS, MAX_SAVES, safeParse, deepClone, formatTagNumber, inferMatchType };
   global.MemoryCardManagerClass = MemoryCardManagerClass;
 })(typeof window !== 'undefined' ? window : this);

@@ -75,6 +75,7 @@
 
       if (!isLocalTurnNow) {
         // Outgoing player stops at their settled Post-End board; incoming player runs Start-Turn on their device
+        global.POVManager?.onTurnStarted?.(state.activePlayerIndex || 0);
         net.onTurnAdvancementComplete?.();
         state.syncUI();
         global.UICardsDeck?.syncMaterialsQueueColumn?.();
@@ -183,6 +184,7 @@
         state.selectedRotation = 0;
         state.upDownAxisState = 0;
         state.placementCursor = { q: 0, r: 0 };
+        global.POVManager?.onTurnStarted?.(state.activePlayerIndex || 0);
 
         const activeMat = state.getActiveMaterial ? state.getActiveMaterial() : null;
         if (activeMat && activeMat.activeCoords && global.BoardRippleRenderer?.playMaterialSpawnPulse) {

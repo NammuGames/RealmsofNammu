@@ -14,6 +14,7 @@
 
   const AURORA_CORE_GREEN = { color: '#000000', secondary: '#0abd0d', glow: '#0abd0d' };
   const AURORA_BRIGHT_GREEN = { color: '#000000', secondary: '#10f000', glow: '#10f000' };
+  const FONT_SCI_FAE = '"Sci-Fae", "SciFaePseudoScript10", sans-serif';
 
   function makeRegularPointyHexDims(radius) {
     const r = Math.max(24, radius);
@@ -54,14 +55,17 @@
         return false;
       }
 
-      if (engine.boardFrame) engine.boardFrame.visible = false;
-      if (engine.leftSidebar) engine.leftSidebar.visible = false;
-      if (engine.rightSidebar) engine.rightSidebar.visible = false;
-      if (engine.topPod) engine.topPod.visible = false;
-      if (engine.bottomPod) engine.bottomPod.visible = false;
+      engine.baseLayerVisible = false;
+      engine.baseLayerInteractive = false;
+      engine.hudFrameAlpha = 1.0;
+      engine.forceGhostSidebars = false;
 
       this._buildScene(engine);
-      engine.setStudioOverlay(this.stageNode);
+      if (typeof engine.setForegroundOverlay === 'function') {
+        engine.setForegroundOverlay(this.stageNode);
+      } else {
+        engine.setStudioOverlay(this.stageNode);
+      }
       this._layoutForViewport(engine.viewWidth || window.innerWidth, engine.viewHeight || window.innerHeight);
 
       if (opts.skipIntro) {
@@ -91,8 +95,12 @@
     unmount() {
       this._cancelTweens();
       const engine = this.ctx?.engine || global.HexUIEngine;
-      if (engine && engine.studioOverlay === this.stageNode) {
-        engine.setStudioOverlay(null);
+      if (engine) {
+        if (engine.foregroundOverlay === this.stageNode && typeof engine.setForegroundOverlay === 'function') {
+          engine.setForegroundOverlay(null);
+        } else if (engine.studioOverlay === this.stageNode) {
+          engine.setStudioOverlay(null);
+        }
       }
       if (this.stageNode) this.stageNode.visible = false;
     }
@@ -144,13 +152,13 @@
       });
 
       const createBranch = (id, label, isPuzzle) => {
-        const node = new HexNode({ id, ...makeRegularPointyHexDims(84), clipContent: false, visible: false, alpha: 0, scale: 0.65, style: makeStyle(isPuzzle) });
+        const node = new HexNode({ id, ...makeRegularPointyHexDims(84), clipContent: false, visible: false, alpha: 1, scale: 0.65, style: makeStyle(isPuzzle) });
         node.isCustomSized = true;
         if (isPuzzle) node.isSidebarButton = true;
         node.addTrait(new TextTrait({
-          title: label, titleSize: isPuzzle ? 24 : 18,
+          title: label, titleSize: isPuzzle ? 34 : 28,
           titleColor: isPuzzle ? '#f8fafc' : 'rgba(203, 213, 225, 0.55)',
-          fontFamily: '"Orbitron", "Inter", sans-serif'
+          fontFamily: FONT_SCI_FAE
         }));
         node.addTrait(new ButtonTrait({
           disabled: !isPuzzle, hoverGlowColor: '#ff9214', hoverOutline: isPuzzle, soundClick: false,
@@ -171,8 +179,8 @@
       rootNode.isCustomSized = true;
       rootNode.isSidebarButton = true;
       rootNode.addTrait(new TextTrait({
-        title: ['Nammu', 'Games'], titleSize: 28, lineSpacing: 32,
-        titleColor: '#f8fafc', fontFamily: '"Orbitron", "Inter", sans-serif'
+        title: ['Nammu', 'Games'], titleSize: 42, lineSpacing: 46,
+        titleColor: '#f8fafc', fontFamily: FONT_SCI_FAE
       }));
       rootNode.addTrait(new ButtonTrait({ hoverGlowColor: '#ff9214', soundClick: false, onClick: () => self._onRootClicked() }));
 
@@ -210,8 +218,8 @@
       this.rootNode.setDimensions(rootDims.wBase, rootDims.hBase, rootDims.apex, 'pointy');
       const rootText = this.rootNode.getTrait('text');
       if (rootText) {
-        rootText.titleSize = Math.max(14, Math.round(28 * s));
-        rootText.lineSpacing = Math.max(16, Math.round(32 * s));
+        rootText.titleSize = Math.max(18, Math.round(42 * s));
+        rootText.lineSpacing = Math.max(20, Math.round(46 * s));
       }
 
       const branchDims = makeRegularPointyHexDims(branchR);
@@ -219,7 +227,7 @@
         b.setDimensions(branchDims.wBase, branchDims.hBase, branchDims.apex, 'pointy');
         const txt = b.getTrait('text');
         if (txt) {
-          txt.titleSize = idx === 1 ? Math.max(12, Math.round(24 * s)) : Math.max(10, Math.round(18 * s));
+          txt.titleSize = idx === 1 ? Math.max(16, Math.round(34 * s)) : Math.max(14, Math.round(28 * s));
         }
       });
 
@@ -262,7 +270,7 @@
       this.rootNode.alpha = 0.0;
       this.branchNodes.forEach((b) => {
         b.visible = false;
-        b.alpha = 0.0;
+        b.alpha = 1.0;
       });
       this._applyPositions();
 
@@ -342,13 +350,13 @@
       this.branchNodes.forEach((b) => {
         b.visible = true;
         b.scale = 0.72;
-        b.alpha = 0.0;
+        b.alpha = this.uiAlpha;
       });
 
       if (!tweens?.add) {
         this.crownProgress = 1.0;
         this.ribbonProgress = 1.0;
-        this.branchNodes.forEach((b) => { b.scale = 1.0; b.alpha = 1.0; });
+        this.branchNodes.forEach((b) => { b.scale = 1.0; b.alpha = this.uiAlpha; });
         this._applyPositions();
         this.stage = 'idle_crown';
         return;
@@ -360,13 +368,12 @@
         to: 1.0,
         duration: Math.round(beatMs * 3.5),
         easing: 'easeOutCubic',
-        onUpdate: (val, rawT) => {
+        onUpdate: (val) => {
           this.crownProgress = val;
           this.ribbonProgress = 1.0;
-          const bAlpha = Math.min(1.0, rawT * 1.5);
           const bScale = 0.72 + 0.28 * val;
           this.branchNodes.forEach((b) => {
-            b.alpha = bAlpha * this.uiAlpha;
+            b.alpha = this.uiAlpha;
             b.scale = bScale;
           });
           this._applyPositions();

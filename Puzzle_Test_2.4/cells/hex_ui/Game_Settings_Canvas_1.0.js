@@ -20,6 +20,11 @@
       this.mode = 'setup'; // 'setup' | 'pause'
       this.history = [];   // Stack of { title, renderFn }
       this.activePresetDraft = null; // Working isolated draft for preset editing
+      this.armedDraftId = null;      // Currently armed persisted Match Draft ID
+      this.armedDraftPreset = null;  // Editable preset snapshot owned by armed Match Draft
+      this._isMatchCopyMode = false;
+      this.isPresetCopyMode = false;
+      this._presetCopyCategory = null;
       this._pendingDeleteIds = new Set();
       this._pendingDeleteCommit = null;
 
@@ -192,12 +197,35 @@
         originPos: origin
       };
       this.history.push(rootEntry);
-      this.buildScene(rootFrame);
 
-      if (global.TweenOrchestrator?.expandFrame) {
-        global.TweenOrchestrator.expandFrame(rootFrame, origin);
+      let expandTargetFrame = rootFrame;
+      if (this.mode === 'setup' && options?.initialColumn === 'Lobby' && typeof this.renderMultiplayerColumn === 'function') {
+        rootFrame.visible = false;
+        const lobbyFrame = this.createPageFrame('settings-frame-Lobby');
+        this.containerNode.addChild(lobbyFrame);
+        const lobbyOrigin = global.TweenOrchestrator?.getOriginPoint?.('pod-preset-single-multiplayer', 0, 0) || origin;
+        this.history.push({
+          title: 'Lobby',
+          renderFn: () => this.renderMultiplayerColumn(lobbyFrame),
+          frame: lobbyFrame,
+          originPos: lobbyOrigin
+        });
+        this.buildScene(lobbyFrame);
+        expandTargetFrame = lobbyFrame;
       } else {
-        rootFrame.visible = true;
+        this.buildScene(rootFrame);
+      }
+
+      if (options?.skipAnimation) {
+        expandTargetFrame.visible = true;
+        expandTargetFrame.scale = 1.0;
+        expandTargetFrame.position.x = 0;
+        expandTargetFrame.position.y = 0;
+        if (options.initialContentAlpha !== undefined) expandTargetFrame.contentAlpha = options.initialContentAlpha;
+      } else if (global.TweenOrchestrator?.expandFrame) {
+        global.TweenOrchestrator.expandFrame(expandTargetFrame, origin);
+      } else {
+        expandTargetFrame.visible = true;
       }
       if (!options?.silent && global.AudioSynth?.playClick) global.AudioSynth.playClick();
       global.BoardRenderer?.render?.();
@@ -207,8 +235,11 @@
       this._pendingDeleteIds?.clear?.();
       this._pendingDeleteCommit = null;
       this._isMatchDeleteMode = false;
+      this._isMatchCopyMode = false;
       this.isPresetDeleteMode = false;
       this._presetDeleteCategory = null;
+      this.isPresetCopyMode = false;
+      this._presetCopyCategory = null;
     }
 
     commitPendingDeletions() {
@@ -268,9 +299,23 @@
       return true;
     }
 
+    formatCopyName(baseName, suffix = ' (Copy)') {
+      const cleanBase = String(baseName || 'Preset').trim() || 'Preset';
+      const raw = `${cleanBase}${suffix}`;
+      const rPop = global.GameSettingsRenamePopup;
+      if (!rPop?.clampWeightedName || !rPop?.getWeightedLength) return raw;
+      if (rPop.getWeightedLength(raw) <= 30.001) return raw;
+      const maxBaseW = Math.max(1, 30.001 - rPop.getWeightedLength(suffix));
+      const trimmedBase = rPop.clampWeightedName(cleanBase, maxBaseW).trimEnd();
+      return rPop.clampWeightedName(`${trimmedBase}${suffix}`);
+    }
+
     getActiveWorkingPreset() {
       if (this.activePresetDraft?.draftItem) {
         return this.activePresetDraft.draftItem;
+      }
+      if (this.armedDraftId && this.armedDraftPreset) {
+        return this.armedDraftPreset;
       }
       const list = this.config.presets || [];
       const idx = Math.max(0, Math.min(list.length - 1, this.config.activePresetIndex || 0));

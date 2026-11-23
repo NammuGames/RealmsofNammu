@@ -9,11 +9,24 @@
 
   // Wide-width character definitions for Sci-Fae Pseudo Script 1.0 (weighted as 1.6 units)
   const WIDE_CHARS = new Set(['M', 'W', 'X', 'Y', 'Z', 'm', 'w', '#']);
+  const MAX_NAME_WEIGHT = 30.001;
 
   function getWeightedLength(str) {
     let len = 0;
-    for (const ch of (str || '')) len += WIDE_CHARS.has(ch) ? 1.6 : 1;
+    for (const ch of String(str || '')) len += WIDE_CHARS.has(ch) ? 1.6 : 1;
     return len;
+  }
+
+  function clampWeightedName(str, maxWeight = MAX_NAME_WEIGHT) {
+    let out = '';
+    let total = 0;
+    for (const ch of String(str || '')) {
+      const w = WIDE_CHARS.has(ch) ? 1.6 : 1;
+      if (total + w > maxWeight) break;
+      out += ch;
+      total += w;
+    }
+    return out;
   }
 
   const DEFAULT_POPUP_CONFIG = {
@@ -132,8 +145,12 @@
       if (!inp || !bar) return;
 
       const isRoom = (this.mode === 'roomCode');
-      const maxLen = isRoom ? 4 : (this._singleMaxLen || 18);
-      inp.maxLength = maxLen;
+      const maxW = (this.mode === 'singleText' && this._singleMaxWeight) ? this._singleMaxWeight : MAX_NAME_WEIGHT;
+      if (isRoom) {
+        inp.maxLength = 4;
+      } else {
+        inp.removeAttribute('maxlength');
+      }
       inp.autocapitalize = isRoom ? 'characters' : 'words';
       inp.placeholder = isRoom ? 'CODE' : (this._singlePlaceholder || this.categoryLabel || 'Name');
       if (this._mobileLabel) {
@@ -162,12 +179,14 @@
         });
       }
 
-      const cleanVal = (v) => isRoom ? v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) : v.slice(0, maxLen);
+      const cleanVal = (v) => isRoom
+        ? v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)
+        : clampWeightedName(v, maxW);
       inp.value = cleanVal(this.targetItem?.name || '');
       inp.oninput = () => {
         if (!this.active || !this.targetItem) return;
         const clean = cleanVal(inp.value);
-        inp.value = clean;
+        if (inp.value !== clean) inp.value = clean;
         if (this.targetItem.name !== clean) {
           this.targetItem.name = clean;
           if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
@@ -203,6 +222,14 @@
       }
     }
 
+    getWeightedLength(str) {
+      return getWeightedLength(str);
+    }
+
+    clampWeightedName(str, maxWeight = MAX_NAME_WEIGHT) {
+      return clampWeightedName(str, maxWeight);
+    }
+
     openRoomCode(initialCode = '', onConfirm = null, options = {}) {
       const cleaned = String(initialCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
       return this.open({ name: cleaned, tagNumber: '' }, 'Room Code', 1, onConfirm, null, { ...options, mode: 'roomCode' });
@@ -211,8 +238,9 @@
     openSingleText(opts = {}) {
       this._singleTitle = opts.title || 'Enter Name';
       this._singlePlaceholder = opts.placeholder || 'Name';
-      this._singleMaxLen = opts.maxLength || 18;
-      const init = String(opts.initialValue || '').slice(0, this._singleMaxLen);
+      this._singleMaxWeight = opts.maxWeight || MAX_NAME_WEIGHT;
+      this._requireNonEmpty = !!opts.requireNonEmpty;
+      const init = clampWeightedName(opts.initialValue || '', this._singleMaxWeight);
       return this.open({ name: init, tagNumber: '' }, this._singleTitle, 1, opts.onConfirm, null, { ...opts, mode: 'singleText' });
     }
 
@@ -412,7 +440,14 @@
       if (isRoomMode) {
         this.targetItem.name = String(this.targetItem?.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
       } else if (isSingleText) {
-        this.targetItem.name = (this.targetItem?.name || '').trim() || this._singlePlaceholder || 'Match 001';
+        const trimmed = (this.targetItem?.name || '').trim();
+        if (!force && this._requireNonEmpty && !trimmed) {
+          if (global.AudioSynth?.playDetonateChime) global.AudioSynth.playDetonateChime(1);
+          global.GameState?.showToast?.('⚠️ Please enter a match name!');
+          this._focusMobileInput?.();
+          return;
+        }
+        this.targetItem.name = trimmed || (this._requireNonEmpty ? '' : (this._singlePlaceholder || 'Match 001'));
       } else {
         this.finalizeNameInput();
         this.finalizeTagInput();
@@ -447,7 +482,7 @@
     }
   }
 
-  GameSettingsRenamePopupClass._text = { WIDE_CHARS, getWeightedLength, DEFAULT_POPUP_CONFIG };
+  GameSettingsRenamePopupClass._text = { WIDE_CHARS, MAX_NAME_WEIGHT, getWeightedLength, clampWeightedName, DEFAULT_POPUP_CONFIG };
 
   const instance = new GameSettingsRenamePopupClass();
   global.GameSettingsRenamePopupClass = GameSettingsRenamePopupClass;

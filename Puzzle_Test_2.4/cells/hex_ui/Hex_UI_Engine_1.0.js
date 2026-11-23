@@ -34,6 +34,15 @@
       // Studio Overlay Layer (Layer 0.5 - Between Board and Sidebars)
       this.studioOverlay = null;
 
+      // Macro-Layer Controls (Base Game Layer vs. Independent Foreground Layer)
+      this.baseLayerVisible = true;
+      this.baseLayerAlpha = 1.0;
+      this.hudFrameAlpha = 1.0;
+      this.baseLayerInteractive = true;
+      this.forceGhostSidebars = false;
+      this.foregroundRoot = null;
+      this.foregroundOverlay = null;
+
       // Stat Pod Layers (Layer 1.2 - Symmetrical Top & Bottom HUD)
       this.topPod = null;
       this.bottomPod = null;
@@ -63,91 +72,28 @@
         return false;
       }
 
-      // 1. Root Scene Node (Viewport bounds)
+      // 1. Root Scene Nodes (Macro-Layer 1: Game Base, Macro-Layer 2: Independent Foreground)
       this.root = new HexNode({ id: 'ui-root', clipContent: false });
+      this.foregroundRoot = new HexNode({ id: 'ui-foreground-root', clipContent: false });
+
+      const makeFrameStyle = () => ({
+        bgColor: '#000000', bgOpacity: 0.12,
+        innerHighlight: { enabled: true, color: '#10f000', sharpEdgeColor: '#10f000', spread: 8, intensity: 0.80, steps: 3 },
+        outerHighlight: { enabled: false, color: '#a855f7', sharpEdgeColor: '#a855f7', blur: 16, intensity: 0.50, steps: 3 }
+      });
 
       // 2. Main Board Frame (Layer 0 - Underneath sidebars, Flat-Top Prismatic Hex)
-      this.boardFrame = new HexNode({
-        id: 'board-frame',
-        orientation: 'flat',
-        style: {
-          bgColor: '#000000',
-          bgOpacity: 0.12,
-          innerHighlight: {
-            enabled: true,
-            color: '#10f000',
-            sharpEdgeColor: '#10f000',
-            spread: 8,
-            intensity: 0.80,
-            steps: 3
-          },
-          outerHighlight: {
-            enabled: false,
-            color: '#a855f7',
-            sharpEdgeColor: '#a855f7',
-            blur: 16,
-            intensity: 0.50,
-            steps: 3
-          }
-        }
-      });
+      this.boardFrame = new HexNode({ id: 'board-frame', orientation: 'flat', style: makeFrameStyle() });
       this.boardFrame.cacheBezel = true;
       this.root.addChild(this.boardFrame);
 
       // 3. Left Sidebar / Scroll-Drum (Layer 1 - On Top, Pointy-Top Prismatic Hex)
-      this.leftSidebar = new HexNode({
-        id: 'sidebar-left',
-        orientation: 'pointy',
-        style: {
-          bgColor: '#000000',
-          bgOpacity: 0.12,
-          innerHighlight: {
-            enabled: true,
-            color: '#10f000',
-            sharpEdgeColor: '#10f000',
-            spread: 8,
-            intensity: 0.80,
-            steps: 3
-          },
-          outerHighlight: {
-            enabled: false,
-            color: '#a855f7',
-            sharpEdgeColor: '#a855f7',
-            blur: 16,
-            intensity: 0.50,
-            steps: 3
-          }
-        }
-      });
+      this.leftSidebar = new HexNode({ id: 'sidebar-left', orientation: 'pointy', style: makeFrameStyle() });
       this.leftSidebar.cacheBezel = true;
       this.root.addChild(this.leftSidebar);
 
       // 4. Right Sidebar / Scroll-Drum (Layer 1 - On Top, Symmetrical)
-      this.rightSidebar = new HexNode({
-        id: 'sidebar-right',
-        orientation: 'pointy',
-        clipContent: true,
-        style: {
-          bgColor: '#000000',
-          bgOpacity: 0.12,
-          innerHighlight: {
-            enabled: true,
-            color: '#10f000',
-            sharpEdgeColor: '#10f000',
-            spread: 8,
-            intensity: 0.80,
-            steps: 3
-          },
-          outerHighlight: {
-            enabled: false,
-            color: '#a855f7',
-            sharpEdgeColor: '#a855f7',
-            blur: 16,
-            intensity: 0.50,
-            steps: 3
-          }
-        }
-      });
+      this.rightSidebar = new HexNode({ id: 'sidebar-right', orientation: 'pointy', clipContent: true, style: makeFrameStyle() });
       this.rightSidebar.cacheBezel = true;
       this.root.addChild(this.rightSidebar);
 
@@ -232,8 +178,45 @@
         global.NativeStatPod.resize(width, height);
       }
 
-      // Refresh transforms throughout the tree
+      // 6. Position Independent Foreground Macro-Layer (if mounted)
+      if (this.foregroundOverlay) {
+        if (!this.foregroundOverlay.animating) {
+          this.foregroundOverlay.position.x = width * 0.5 + (this.foregroundOverlay.offsetX || 0);
+          this.foregroundOverlay.position.y = height * 0.5 + (this.foregroundOverlay.offsetY || 0);
+        }
+        if (typeof this.foregroundOverlay.onResize === 'function') {
+          this.foregroundOverlay.onResize(width, height);
+        }
+      }
+
+      // Refresh transforms throughout both macro-layer trees
       this.root.updateTransforms();
+      this._syncForegroundRootTransform();
+      this.foregroundRoot?.updateTransforms();
+    }
+
+    _syncForegroundRootTransform() {
+      if (!this.foregroundRoot || !this.root) return;
+      this.foregroundRoot.position.x = this.root.position.x;
+      this.foregroundRoot.position.y = this.root.position.y;
+      this.foregroundRoot.scale = this.root.scale;
+      this.foregroundRoot.rotation = this.root.rotation;
+    }
+
+    setForegroundOverlay(node) {
+      if (this.foregroundOverlay && this.foregroundOverlay.parent === this.foregroundRoot) {
+        this.foregroundRoot.removeChild(this.foregroundOverlay);
+      }
+      this.foregroundOverlay = node || null;
+      if (node && this.foregroundRoot) {
+        if (this.viewWidth && this.viewHeight) {
+          node.position.x = this.viewWidth * 0.5 + (node.offsetX || 0);
+          node.position.y = this.viewHeight * 0.5 + (node.offsetY || 0);
+        }
+        this.foregroundRoot.addChild(node);
+        this._syncForegroundRootTransform();
+        this.foregroundRoot.updateTransforms();
+      }
     }
 
     setStudioOverlay(node) {
@@ -266,70 +249,96 @@
     render(ctx) {
       if (!this.initialized || !this.root) return;
 
-      this.root.updateTransforms();
+      // --- MACRO-LAYER 1: Base Game Layer (Board, Studio Overlays, Sidebars, Stat Pods) ---
+      const baseAlpha = Math.max(0, Math.min(1, this.baseLayerAlpha ?? 1.0));
+      if (this.baseLayerVisible && baseAlpha > 0.001) {
+        this.root.updateTransforms();
+        const hudAlpha = Math.max(0, Math.min(1, this.hudFrameAlpha ?? 1.0));
+        ctx.save();
+        if (baseAlpha < 0.999) ctx.globalAlpha *= baseAlpha;
 
-      // --- LAYER 0: Render Board Frame (Underneath) ---
-      if (this.boardFrame && this.boardFrame.visible) {
-        this.boardFrame.render(ctx);
-
-        // Render game board content inside board frame clipping aperture
-        if (typeof this.boardRenderDelegate === 'function' && (this.boardContentAlpha ?? 1.0) > 0.001) {
+        // --- LAYER 0: Render Board Frame (Underneath) ---
+        if (this.boardFrame && this.boardFrame.visible && hudAlpha > 0.001) {
           ctx.save();
-          if ((this.boardContentAlpha ?? 1.0) < 0.999) {
-            ctx.globalAlpha *= Math.max(0, this.boardContentAlpha);
-          }
-          const w = this.boardFrame.worldMatrix;
-          ctx.setTransform(w[0], w[1], w[2], w[3], w[4], w[5]);
+          if (hudAlpha < 0.999) ctx.globalAlpha *= hudAlpha;
+          this.boardFrame.render(ctx);
 
-          // Clip to board frame polygon
-          const geom = global.HexFrameGeometry;
-          if (geom) {
-            geom.buildPath(ctx, this.boardFrame.getVertices());
-            ctx.clip();
-          }
+          // Render game board content inside board frame clipping aperture
+          if (typeof this.boardRenderDelegate === 'function' && (this.boardContentAlpha ?? 1.0) > 0.001) {
+            ctx.save();
+            if ((this.boardContentAlpha ?? 1.0) < 0.999) {
+              ctx.globalAlpha *= Math.max(0, this.boardContentAlpha);
+            }
+            const w = this.boardFrame.worldMatrix;
+            ctx.setTransform(w[0], w[1], w[2], w[3], w[4], w[5]);
 
-          this.boardRenderDelegate(ctx, 0, 0, this.boardFrame);
+            // Clip to board frame polygon
+            const geom = global.HexFrameGeometry;
+            if (geom) {
+              geom.buildPath(ctx, this.boardFrame.getVertices());
+              ctx.clip();
+            }
+
+            this.boardRenderDelegate(ctx, 0, 0, this.boardFrame);
+            ctx.restore();
+          }
           ctx.restore();
         }
-      }
 
-      // --- LAYER 0.5: Render Studio Overlay Frame (Between Board & Sidebars) ---
-      const hasOverlay = !!(this.studioOverlay && this.studioOverlay.visible);
-      if (hasOverlay) {
-        this.studioOverlay.render(ctx);
-      }
-
-      // --- LAYER 1: Render Sidebars (On Top — covers horizontal apex points) ---
-      if (this.leftSidebar && this.leftSidebar.visible) {
-        this.leftSidebar.render(ctx);
-      }
-      if (this.rightSidebar && this.rightSidebar.visible) {
-        this.rightSidebar.render(ctx);
-      }
-
-      // --- LAYER 1.2: Render Top & Bottom Stat Pods (Fade in/out with overlay transitions) ---
-      this._syncPodFade();
-      const showPods = this._podFadeAlpha > 0.001;
-      if (this.topPod) {
-        this.topPod.visible = showPods;
-        this.topPod.alpha = this._podFadeAlpha;
-      }
-      if (this.bottomPod) {
-        this.bottomPod.visible = showPods;
-        this.bottomPod.alpha = this._podFadeAlpha;
-      }
-
-      if (showPods) {
-        if (this.topPod && this.topPod.visible) {
-          this.topPod.render(ctx);
+        // --- LAYER 0.5: Render Studio Overlay Frame (Between Board & Sidebars) ---
+        if (this.studioOverlay && this.studioOverlay.visible) {
+          this.studioOverlay.render(ctx);
         }
-        if (this.bottomPod && this.bottomPod.visible) {
-          this.bottomPod.render(ctx);
+
+        // --- LAYER 1: Render Sidebars (On Top — covers horizontal apex points) ---
+        if (hudAlpha > 0.001) {
+          ctx.save();
+          if (hudAlpha < 0.999) ctx.globalAlpha *= hudAlpha;
+          if (this.leftSidebar && this.leftSidebar.visible) {
+            this.leftSidebar.render(ctx);
+          }
+          if (this.rightSidebar && this.rightSidebar.visible) {
+            this.rightSidebar.render(ctx);
+          }
+          ctx.restore();
         }
+
+        // --- LAYER 1.2: Render Top & Bottom Stat Pods (Fade in/out with overlay transitions) ---
+        this._syncPodFade();
+        const showPods = this._podFadeAlpha > 0.001 && hudAlpha > 0.001;
+        if (this.topPod) {
+          this.topPod.visible = showPods;
+          this.topPod.alpha = this._podFadeAlpha * hudAlpha;
+        }
+        if (this.bottomPod) {
+          this.bottomPod.visible = showPods;
+          this.bottomPod.alpha = this._podFadeAlpha * hudAlpha;
+        }
+
+        if (showPods) {
+          if (this.topPod && this.topPod.visible) {
+            this.topPod.render(ctx);
+          }
+          if (this.bottomPod && this.bottomPod.visible) {
+            this.bottomPod.render(ctx);
+          }
+        }
+        ctx.restore();
+      } else {
+        this._podFadeAlpha = 0;
+        this._podsTargetHidden = true;
+      }
+
+      // --- MACRO-LAYER 2: Independent Foreground Overlay (e.g. Hub Shell) ---
+      if (this.foregroundRoot && this.foregroundOverlay && this.foregroundOverlay.visible) {
+        this._syncForegroundRootTransform();
+        this.foregroundRoot.updateTransforms();
+        this.foregroundOverlay.render(ctx);
       }
     }
 
     _shouldHideStatPods() {
+      if (!this.baseLayerVisible) return true;
       if (!this.studioOverlay || !this.studioOverlay.visible) return false;
       const isPopupOnly = this.studioOverlay.id === 'turn-confirm-scrim' || this.studioOverlay.id === 'turn-confirm-frame';
       if (isPopupOnly) return false;
@@ -407,8 +416,14 @@
       return this.customBoardWidth || (this.boardFrame ? this.boardFrame.dimensions.wBase : 1430);
     }
 
-    findNodeById(id, start = this.root) {
-      if (!start) return null;
+    findNodeById(id, start = null) {
+      if (!start) {
+        const fg = (this.foregroundOverlay?.visible && this.foregroundRoot)
+          ? this.findNodeById(id, this.foregroundRoot)
+          : null;
+        if (fg) return fg;
+        return this.root ? this.findNodeById(id, this.root) : null;
+      }
       if (start.id === id) return start;
       const list = (start.children || []).concat(start.tetheredChildren || []);
       for (let i = 0; i < list.length; i++) {

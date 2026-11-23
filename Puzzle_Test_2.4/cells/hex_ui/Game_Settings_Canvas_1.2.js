@@ -65,6 +65,13 @@
   Proto.confirmPresetEdit = function() {
     const draft = this.getCurrentDraft();
     if (!draft) return;
+    if (this.isMatchReadOnly?.()) {
+      if (this.history.length > 0) {
+        delete this.history[this.history.length - 1].presetDraft;
+      }
+      this.popColumn();
+      return;
+    }
     Object.assign(draft.targetItem, draft.draftItem);
 
     if (typeof draft.onSelect === 'function') {
@@ -83,15 +90,17 @@
   };
 
   // ── 5. REUSABLE "PRESET" COLUMN ──────────────────────────────────────────
-  Proto.renderPresetColumn = function(categoryLabel, list, activeIdx, onSelect, onOpen) {
+  Proto.renderPresetColumn = function(categoryLabel, list, activeIdx, onSelect, onOpen, forceReadOnly = false) {
     const self = this;
+    const ro = !!(forceReadOnly || self.isMatchReadOnly?.());
     if (Array.isArray(list)) {
       const targetItem = list[activeIdx];
       self.sortPresetList(list);
       if (targetItem) activeIdx = Math.max(0, list.indexOf(targetItem));
     }
     const isExclusiveList = (categoryLabel === 'Match' || categoryLabel === 'Luck' || categoryLabel === 'Blight');
-    const isDeleteMode = !!self.isPresetDeleteMode && (self._presetDeleteCategory === categoryLabel);
+    const isDeleteMode = !ro && !!self.isPresetDeleteMode && (self._presetDeleteCategory === categoryLabel);
+    const isCopyMode = !ro && !isDeleteMode && !!self.isPresetCopyMode && (self._presetCopyCategory === categoryLabel);
     const isVectorCategory = (categoryLabel === 'String' || categoryLabel === 'Strain');
     const pendingDel = self._pendingDeleteIds || (self._pendingDeleteIds = new Set());
     const keyOf = (it, i) => it?.id || `${categoryLabel}_${i}`;
@@ -102,10 +111,15 @@
       const numStr = item.tagNumber || String(idx + 1).padStart(3, '0');
       const tag = `${categoryLabel} ${numStr}`;
 
-      let itemColor = isVectorCategory ? '#3d6eff' : '#c084fc';
+      let itemColor = ro ? '#953ffd' : (isVectorCategory ? '#3d6eff' : '#c084fc');
       let isDouble = false;
-      if (isDeleteMode) {
+      if (ro) {
+        itemColor = '#953ffd';
+        isDouble = false;
+      } else if (isDeleteMode) {
         itemColor = '#ff3333';
+      } else if (isCopyMode) {
+        itemColor = '#fff700';
       } else if (isChosen) {
         itemColor = isVectorCategory ? '#3d6eff' : '#ff8800';
         isDouble = true;
@@ -115,7 +129,12 @@
         type: 'preset_name', id: `preset-opt-${idx}`, title: item.name, categoryIndexText: tag,
         color: itemColor,
         isDoubleBorder: isDouble,
+        isLockedPurple: ro,
         onClick: () => {
+          if (ro) {
+            if (typeof onOpen === 'function') onOpen(idx);
+            return;
+          }
           if (isDeleteMode) {
             if (visibleEntries.length <= 1) {
               global.GameState?.showToast?.(`⚠️ Cannot delete the only remaining ${categoryLabel}!`);
@@ -138,9 +157,34 @@
             };
             global.GameState?.showToast?.(`⏳ Staged "${item.name}" for deletion — press Confirm to finalize or Return to cancel`);
             self.buildScene();
+          } else if (isCopyMode) {
+            const nextTag = self.getNextUniqueTag(list);
+            const tagInt = parseInt(nextTag, 10) || (list.length + 1);
+            const newItem = JSON.parse(JSON.stringify(item));
+            newItem.id = `${categoryLabel.toLowerCase().slice(0, 3)}_${Date.now()}`;
+            newItem.name = self.formatCopyName ? self.formatCopyName(item.name) : `${item.name} (Copy)`;
+            newItem.tagNumber = nextTag;
+            if (isVectorCategory && newItem.spawnCount === undefined) newItem.spawnCount = 1;
+            if (newItem.activePlayfieldIndex !== undefined) newItem.activePlayfieldIndex = 0;
+            if (newItem.activeMaterialIndex !== undefined) newItem.activeMaterialIndex = 0;
+
+            if (global.GameSettingsRenamePopup?.open) {
+              global.GameSettingsRenamePopup.open(newItem, categoryLabel, tagInt, () => {
+                self.isPresetCopyMode = false;
+                self._presetCopyCategory = null;
+                list.push(newItem);
+                const newIdx = self.sortPresetList(list, newItem);
+                global.GameState?.showToast?.(`✦ Copied ${categoryLabel}: "${newItem.name}"`);
+                if (typeof onOpen !== 'function' && typeof onSelect === 'function') onSelect(newIdx);
+                self.buildScene();
+                if (typeof onOpen === 'function') onOpen(newIdx);
+              }, list, { isAddNew: true, originNode: `pod-preset-preset-opt-${idx}` });
+            }
           } else {
             self.isPresetDeleteMode = false;
             self._presetDeleteCategory = null;
+            self.isPresetCopyMode = false;
+            self._presetCopyCategory = null;
             if (typeof onOpen === 'function') {
               onOpen(idx);
             } else {
@@ -153,36 +197,26 @@
       };
     });
 
-    // Bottom Base Button: "Add New"
+    // Bottom Base Button: "Copy" (Yellow toggle, turns selectable cards yellow)
     items.push({
       type: 'base',
-      id: `preset-add-new-${categoryLabel.toLowerCase()}`,
-      title: 'Add New',
-      color: isVectorCategory ? '#3d6eff' : '#10f000',
+      id: `preset-copy-${categoryLabel.toLowerCase()}`,
+      title: isCopyMode ? '✖ Cancel Copy' : 'Copy',
+      color: ro ? '#953ffd' : '#fff700',
+      ghost: ro,
+      isReadOnly: ro,
       onClick: () => {
+        if (ro) return;
         self.isPresetDeleteMode = false;
         self._presetDeleteCategory = null;
-        const nextTag = self.getNextUniqueTag(list);
-        const tagInt = parseInt(nextTag, 10) || (list.length + 1);
-        const template = list[activeIdx] || list[0] || {};
-        const newItem = JSON.parse(JSON.stringify(template));
-        newItem.id = `${categoryLabel.toLowerCase().slice(0, 3)}_${Date.now()}`;
-        newItem.name = `${categoryLabel} ${tagInt}`;
-        newItem.tagNumber = nextTag;
-        if (isVectorCategory && newItem.spawnCount === undefined) newItem.spawnCount = 1;
-        if (newItem.activePlayfieldIndex !== undefined) newItem.activePlayfieldIndex = 0;
-        if (newItem.activeMaterialIndex !== undefined) newItem.activeMaterialIndex = 0;
-
-        if (global.GameSettingsRenamePopup?.open) {
-          global.GameSettingsRenamePopup.open(newItem, categoryLabel, tagInt, () => {
-            list.push(newItem);
-            const newIdx = self.sortPresetList(list, newItem);
-            global.GameState?.showToast?.(`✦ Created ${categoryLabel}: "${newItem.name}"`);
-            if (typeof onOpen !== 'function' && typeof onSelect === 'function') onSelect(newIdx);
-            self.buildScene();
-            if (typeof onOpen === 'function') onOpen(newIdx);
-          }, list, { isAddNew: true });
+        if (isCopyMode) {
+          self.isPresetCopyMode = false;
+          self._presetCopyCategory = null;
+        } else {
+          self.isPresetCopyMode = true;
+          self._presetCopyCategory = categoryLabel;
         }
+        self.buildScene();
       }
     });
 
@@ -191,8 +225,13 @@
       type: 'base',
       id: `preset-delete-${categoryLabel.toLowerCase()}`,
       title: isDeleteMode ? '✖ Cancel Delete' : 'Delete',
-      color: '#ff3333',
+      color: ro ? '#953ffd' : '#ff3333',
+      ghost: ro,
+      isReadOnly: ro,
       onClick: () => {
+        if (ro) return;
+        self.isPresetCopyMode = false;
+        self._presetCopyCategory = null;
         if (isDeleteMode) {
           self.isPresetDeleteMode = false;
           self._presetDeleteCategory = null;
@@ -321,6 +360,14 @@
   };
 
   Proto.launchMatch = function() {
+    if (typeof this.launchMatchWithNamingGate === 'function') {
+      return this.launchMatchWithNamingGate();
+    }
+    const name = String(this.config.pendingMatchName || '').trim() || 'Match';
+    return this._executeNewMatchLaunch(name, null);
+  };
+
+  Proto._executeNewMatchLaunch = function(resolvedMatchName, armedDraft = null) {
     const net = global.NetworkP2PManager;
     const mc = global.MemoryCardManager;
     if (net?.role === 'guest' && net?.isConnected?.()) {
@@ -328,29 +375,9 @@
       return;
     }
 
-    // Resume an armed Saved Match (instead of starting a brand-new match)
-    const armed = this.getArmedSavedMatch ? this.getArmedSavedMatch() : null;
-    if (armed) {
-      this.isMatchActive = true;
-      const shouldHostOnline = !!(net && (armed.lobbyMode === 'Online' || armed.roleBadge === 'Host' || this.config.lobbyMode === 'Online'));
-      const resumeFlow = async () => {
-        if (shouldHostOnline && net.role !== 'host') {
-          try { await net.hostRoom(armed.roomCode || null, { matchName: armed.matchName }); } catch {}
-        }
-        mc?.restorePuzzleState?.(armed);
-        if (net?.role === 'host') {
-          net._assignDefaultSeats?.(armed.playerCount || global.GameState?.playerCount || 1);
-          setTimeout(() => net.syncFullState?.('MATCH_RESUME'), 250);
-        }
-        global.GameState?.showToast?.(`✦ Resumed "${armed.matchName || 'Saved Match'}"`);
-      };
-      resumeFlow();
-      return;
-    }
-
     const list = this.config.presets;
     const activeIdx = Math.max(0, Math.min((list?.length || 1) - 1, this.config.activePresetIndex || 0));
-    const curPreset = (list && list[activeIdx]) || list?.[0] || {};
+    const curPreset = (armedDraft && this.armedDraftPreset) || (list && list[activeIdx]) || list?.[0] || {};
     const m = curPreset.match || (this.config.matchPresets ? (this.config.matchPresets[this.config.activeMatchPresetIndex] || this.config.matchPresets[0]) : {});
     const l = curPreset.luck || (this.config.luckPresets ? (this.config.luckPresets[this.config.activeLuckPresetIndex] || this.config.luckPresets[0]) : {});
     const b = curPreset.blight || (this.config.blightPresets ? (this.config.blightPresets[this.config.activeBlightPresetIndex] || this.config.blightPresets[0]) : {});
@@ -364,8 +391,9 @@
 
     const isOnline = !!(net?.isConnected?.() || this.config.lobbyMode === 'Online');
     const totalPlayers = (net?.role === 'host' && seats.length > 0) ? seats.length : this.config.playerCount;
-    const roomCode = net?.roomCode || (this.getPendingRoomCode ? this.getPendingRoomCode() : (mc?.generateUniqueRoomCode?.() || '4K9P'));
-    const matchName = (net?.role === 'host' && net.matchName) ? net.matchName : (this.getPendingMatchName ? this.getPendingMatchName() : `Match ${roomCode}`);
+    const roomCode = isOnline ? (net?.roomCode || (this.getPendingRoomCode ? this.getPendingRoomCode() : (mc?.generateUniqueRoomCode?.() || '4K9P'))) : '';
+    const matchName = String(resolvedMatchName || '').trim();
+    const matchType = isOnline ? 'Host' : 'Local';
     const roleBadge = isOnline ? 'Host' : 'Player';
     const lobbyMode = isOnline ? 'Online' : 'Local';
 
@@ -386,26 +414,39 @@
       blightPreset: b
     };
 
-    if (mc) mc.activeMatchId = `puzzle_${Date.now()}`;
+    const promoteDraftId = armedDraft?.id || null;
+    if (mc) mc.activeMatchId = promoteDraftId || `puzzle_${Date.now()}`;
     this.config.pendingRoomCode = null;
     this.config.pendingMatchName = null;
+    this.selectedSavedMatchId = null;
+    this.clearArmedDraft?.();
     this.isMatchActive = true;
 
     this.close(async () => {
-      if (isOnline && net && net.role !== 'host') {
-        try { await net.hostRoom(roomCode, { matchName, localPlayerCount: this.config.playerCount }); } catch {}
+      if (isOnline && net) {
+        net.matchName = matchName;
+        if (net.role !== 'host') {
+          try { await net.hostRoom(roomCode, { matchName, localPlayerCount: this.config.playerCount }); } catch {}
+        } else {
+          net._broadcastRoster?.();
+        }
       }
       if (global.GameState) {
         global.GameState.matchName = matchName;
+        global.GameState.matchType = matchType;
         global.GameState.roomCode = roomCode;
         global.GameState.roleBadge = roleBadge;
         global.GameState.lobbyMode = lobbyMode;
         if (global.GameState.setMatchConfig) global.GameState.setMatchConfig(matchConfig);
       }
-      // Auto-save newly launched match to Saved Matches once startup settles
+      // Promote armed Draft in place (or save fresh Local/Host match) once startup settles
       setTimeout(() => {
         if (global.GameState?.matchStarted) {
-          mc?.saveActivePuzzleMatch?.(mc.activeMatchId, { matchName, roomCode, roleBadge, lobbyMode });
+          if (promoteDraftId && mc?.promoteDraftToStarted) {
+            mc.promoteDraftToStarted(promoteDraftId, { matchName, matchType, roomCode, roleBadge, lobbyMode });
+          } else {
+            mc?.saveActivePuzzleMatch?.(mc.activeMatchId, { matchName, matchType, roomCode, roleBadge, lobbyMode });
+          }
         }
       }, 1700);
       global.GameState?.showToast?.(`✦ ${matchName} • ${totalPlayers} Player(s) • Radius-${m.boardRadius ?? 6}`);

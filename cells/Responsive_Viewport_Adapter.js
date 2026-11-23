@@ -285,6 +285,15 @@
           }
         };
       }
+      if (typeof engine.setForegroundOverlay === 'function') {
+        const origSetFg = engine.setForegroundOverlay.bind(engine);
+        engine.setForegroundOverlay = (node) => {
+          origSetFg(node);
+          if (node) {
+            this.applyLayoutToEngine(this.virtualWidth || engine.viewWidth, this.virtualHeight || engine.viewHeight);
+          }
+        };
+      }
       this._wrappedEngine = true;
     }
 
@@ -403,6 +412,15 @@
       }
 
       engine.root?.updateTransforms();
+      engine._syncForegroundRootTransform?.();
+      const fg = engine.foregroundOverlay;
+      if (fg && !fg.animating) {
+        fg.scale = 1.0;
+        fg.position.x = vw * 0.5 + (fg.offsetX || 0);
+        fg.position.y = vh * 0.5 + (fg.offsetY || 0);
+        if (typeof fg.onResize === 'function') fg.onResize(vw, vh);
+      }
+      engine.foregroundRoot?.updateTransforms();
     }
   }
 

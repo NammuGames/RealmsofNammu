@@ -264,11 +264,52 @@
 
     initGameMenuTab() {
       const btnCopy = document.getElementById('btn-copy-game-menu-config');
-      if (!btnCopy) return;
+      if (btnCopy) {
+        btnCopy.addEventListener('click', () => {
+          const text = JSON.stringify(this._buildExportMenuConfig(), null, 2);
+          this._copyTextWithFeedback(text, btnCopy, '📋 Game Menu presets copied as JSON!');
+          if (this.audio?.playClick) this.audio.playClick();
+        });
+      }
+      this.initHubPreviewControls();
+    }
 
-      btnCopy.addEventListener('click', () => {
-        const text = JSON.stringify(this._buildExportMenuConfig(), null, 2);
-        this._copyTextWithFeedback(text, btnCopy, '📋 Game Menu presets copied as JSON!');
+    initHubPreviewControls() {
+      const slW = document.getElementById('slider-hub-title-w');
+      const valW = document.getElementById('val-hub-title-w');
+      const slY = document.getElementById('slider-hub-title-y');
+      const valY = document.getElementById('val-hub-title-y');
+      const inpTitle = document.getElementById('input-hub-upper-title');
+      const inpInst = document.getElementById('input-hub-instruct-text');
+      const btnCopy = document.getElementById('btn-copy-hub-preview-config');
+      if (!slW && !slY && !inpTitle && !inpInst && !btnCopy) return;
+
+      const staging = () => global.HubLaunchStaging;
+      const cur = staging()?.getPreviewConfig?.() || { titleW: 960, titleOffsetY: 270, upperTitle: 'Puzzle Beta', instructText: '' };
+      if (slW) { slW.value = cur.titleW; if (valW) valW.textContent = `${cur.titleW} px`; }
+      if (slY) { slY.value = cur.titleOffsetY; if (valY) valY.textContent = `${cur.titleOffsetY} px`; }
+      if (inpTitle) inpTitle.value = cur.upperTitle || '';
+      if (inpInst) inpInst.value = cur.instructText || '';
+
+      if (slW) slW.addEventListener('input', () => {
+        const v = parseInt(slW.value, 10) || 960;
+        if (valW) valW.textContent = `${v} px`;
+        staging()?.setPreviewConfig?.({ titleW: v });
+      });
+      if (slY) slY.addEventListener('input', () => {
+        const v = parseInt(slY.value, 10) || 270;
+        if (valY) valY.textContent = `${v} px`;
+        staging()?.setPreviewConfig?.({ titleOffsetY: v });
+      });
+      if (inpTitle) inpTitle.addEventListener('input', () => {
+        staging()?.setPreviewConfig?.({ upperTitle: inpTitle.value });
+      });
+      if (inpInst) inpInst.addEventListener('input', () => {
+        staging()?.setPreviewConfig?.({ instructText: inpInst.value });
+      });
+      if (btnCopy) btnCopy.addEventListener('click', () => {
+        const cfg = staging()?.getPreviewConfig?.() || {};
+        this._copyTextWithFeedback(JSON.stringify(cfg, null, 2), btnCopy, '📋 Hub Preview config copied as JSON!');
         if (this.audio?.playClick) this.audio.playClick();
       });
     }

@@ -22,7 +22,9 @@
     }
 
     isAnyCanvasOpen() {
-      return !!(global.StatCanvas?.isOpen?.() || global.GameSettingsCanvas?.isOpen?.() || global.CanvasHub?.isOpen?.() || global.SigilNookCanvas?.isOpen?.() || global.SigilEmblemStudio?.isOpen?.() || (global.HexUIEngine?.studioOverlay?.visible));
+      const eng = global.HexUIEngine;
+      if (eng && (!eng.baseLayerVisible || !eng.baseLayerInteractive || eng.foregroundOverlay?.visible)) return true;
+      return !!(global.StatCanvas?.isOpen?.() || global.GameSettingsCanvas?.isOpen?.() || global.CanvasHub?.isOpen?.() || global.SigilNookCanvas?.isOpen?.() || global.SigilEmblemStudio?.isOpen?.() || (eng?.studioOverlay?.visible));
     }
 
     /**
@@ -178,6 +180,7 @@
 
         if (e.shiftKey && isOverBoard) {
           e.preventDefault();
+          if (global.POVManager?.isSpectatingOrMismatched?.()) return;
           state.rotatePiece(e.deltaY > 0 ? 'cw' : 'ccw');
         }
       }, { passive: false });
@@ -202,6 +205,7 @@
      */
     handleBoardClick(sx, sy) {
       if (this.isAnyCanvasOpen()) return;
+      if (global.POVManager?.isSpectatingOrMismatched?.()) return;
       const state = global.GameState, renderer = global.BoardRenderer, engine = global.HexUIEngine, math = global.HexMath, audio = global.AudioSynth;
       if (!state || !renderer || !math || !state.matchStarted || state.isMatchStarting || state.isMatchEnding || state.isSequentialPlacing) return;
 

@@ -96,16 +96,19 @@
       this.accumulator += dt;
 
       // 1. Fixed 60Hz Code/Simulation Tick (Deterministic)
+      const baseLayerActive = !engine || engine.baseLayerVisible !== false;
       let didTick = false;
       while (this.accumulator >= this.FIXED_DT - 0.0005) {
         state.time += this.FIXED_DT;
-        const spinSpeed = (state.polySpinSpeed !== undefined) ? state.polySpinSpeed : 0.1;
-        if (polyRender && typeof polyRender.advanceTime === 'function') {
-          polyRender.advanceTime(this.FIXED_DT * spinSpeed);
-        }
+        if (baseLayerActive) {
+          const spinSpeed = (state.polySpinSpeed !== undefined) ? state.polySpinSpeed : 0.1;
+          if (polyRender && typeof polyRender.advanceTime === 'function') {
+            polyRender.advanceTime(this.FIXED_DT * spinSpeed);
+          }
 
-        if (cameraCtrl) cameraCtrl.update();
-        if (deck) deck.updateRightSidebarDeck();
+          if (cameraCtrl) cameraCtrl.update();
+          if (deck) deck.updateRightSidebarDeck();
+        }
         if (global.TweenOrchestrator) global.TweenOrchestrator.update(this.FIXED_DT);
 
         this.accumulator = Math.max(0, this.accumulator - this.FIXED_DT);
@@ -162,7 +165,7 @@
       // 4Hz State Sync + Optional Silicon Telemetry Update
       if (now - this.lastTelemetryUpdate >= 250) {
         this.lastTelemetryUpdate = now;
-        if (deckSync) {
+        if (deckSync && baseLayerActive) {
           deckSync.syncMaterialsTrayWithGameState();
           deckSync.syncNativeStatPodWithGameState();
         }

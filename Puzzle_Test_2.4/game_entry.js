@@ -36,6 +36,7 @@
     'cells/Turn_Manager.js',
     'cells/Turn_Log_Manager.js',
     'cells/Turn_Log_Player.js',
+    'cells/POV_Manager.js',
     'cells/Last_Breath_Manager_1.0.js',
     'cells/Last_Breath_Manager_1.1.js',
     'cells/Last_Breath_Manager.js',
@@ -105,6 +106,7 @@
     'cells/hex_ui/Game_Settings_Canvas_1.2.js',
     'cells/hex_ui/Game_Settings_Canvas_1.3.js',
     'cells/hex_ui/Game_Settings_Memory_Matches.js',
+    'cells/hex_ui/Game_Settings_Match_Drafts.js',
     'cells/hex_ui/Game_Settings_Lobby.js',
     'cells/hex_ui/Game_Settings_Pause.js',
     'cells/hex_ui/Game_Settings_Rename_Popup_1.0.js',
@@ -122,6 +124,8 @@
     'cells/hex_ui/Stat_Canvas_1.0.js',
     'cells/hex_ui/Stat_Canvas_1.1.js',
     'cells/hex_ui/Stat_Canvas.js',
+    'cells/hex_ui/Room_Stat_Canvas_1.0.js',
+    'cells/hex_ui/Room_Stat_Canvas_1.1.js',
     'cells/hex_ui/Room_Stat_Canvas.js',
     'cells/hex_ui/UI_Cards_Deck_1.0.js',
     'cells/hex_ui/UI_Cards_Deck_1.1.js',
@@ -142,7 +146,11 @@
     'cells/hex_ui/Audio_Tuning_Lab.js',
     'cells/hex_ui/Board_Edit_Lab.js',
     'cells/hex_ui/Board_Edit_Ops.js',
-    'cells/hex_ui/Board_Edit_Renderer.js',
+    'cells/hex_ui/Board_Edit_Renderer.js'
+  ];
+
+  // Heavy Font Studio authoring scripts deferred out of critical Step 0 launch path
+  const FONT_STUDIO_SCRIPTS = [
     'https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js',
     'https://cdn.jsdelivr.net/npm/paper@0.12.18/dist/paper-core.min.js',
     'cells/font_studio/Font_Studio_Presets.js',
@@ -164,8 +172,9 @@
   global.GAME_ENTRIES.puzzle = {
     id: 'puzzle',
     scripts: PUZZLE_SCRIPTS,
+    deferredScripts: FONT_STUDIO_SCRIPTS,
 
-    mount(ctx = {}, _meta = {}, opts = {}) {
+    async mount(ctx = {}, _meta = {}, opts = {}) {
       const state = ctx.state || global.COSMOS_STATE;
       const dom = ctx.dom || {};
       const warp = ctx.warp || global.CosmicDomainWarp;
@@ -179,11 +188,26 @@
         return;
       }
 
-      // Restore Puzzle macro frames & clear any Hub placeholder overlay
-      if (engine.boardFrame) engine.boardFrame.visible = true;
-      if (engine.leftSidebar) engine.leftSidebar.visible = true;
-      if (engine.rightSidebar) engine.rightSidebar.visible = true;
-      engine.setStudioOverlay(null);
+      const invisible = !!(opts?.invisibleMount || opts?.preserveOverlay);
+      if (engine.boardFrame) { engine.boardFrame.visible = true; engine.boardFrame.alpha = 1; }
+      if (engine.leftSidebar) { engine.leftSidebar.visible = true; engine.leftSidebar.alpha = 1; }
+      if (engine.rightSidebar) { engine.rightSidebar.visible = true; engine.rightSidebar.alpha = 1; }
+      engine.boardContentAlpha = 1.0;
+      if (!invisible) {
+        engine.baseLayerVisible = true;
+        engine.baseLayerAlpha = 1.0;
+        engine.hudFrameAlpha = 1.0;
+        engine.baseLayerInteractive = true;
+        engine.forceGhostSidebars = false;
+        engine.setStudioOverlay(null);
+      } else {
+        engine.baseLayerVisible = false;
+        engine.baseLayerAlpha = 1.0;
+        engine.hudFrameAlpha = 0.0;
+        engine.baseLayerInteractive = false;
+        engine._podFadeAlpha = 0;
+        engine._podsTargetHidden = true;
+      }
 
       const polyRender = global.PolyhedronRenderer;
       const studio = global.SigilEmblemStudio;
@@ -199,9 +223,20 @@
       const deckSync = global.UIDeckSync;
       const sidebarDeck = global.UISidebarDeck;
 
+      const timeSliced = !!(opts?.timeSliced || invisible);
+      const yieldFrame = () => (typeof requestAnimationFrame === 'function'
+        ? new Promise((r) => requestAnimationFrame(r))
+        : Promise.resolve());
+      const reportMountStep = async (step, total = 6) => {
+        if (typeof opts?.onMountProgress === 'function') opts.onMountProgress(step, total);
+        if (timeSliced) await yieldFrame();
+      };
+
       if (!_puzzleMountedOnce) {
         if (boardRenderer) boardRenderer.mount(engine);
         if (inputController && dom.canvasBoard) inputController.init(dom.canvasBoard);
+        await reportMountStep(1, 6);
+
         if (studio) studio.init(engine);
         if (compCanvas) compCanvas.init(engine);
         if (alignCanvas) alignCanvas.init(engine);
@@ -210,15 +245,27 @@
         if (fontDeck) fontDeck.init(engine, glyphCanvas);
         if (fontBuilder) {
           fontBuilder.init();
-          fontBuilder.applyLiveToGame(true);
+          const hasSciFae = typeof document !== 'undefined' && document.fonts?.check?.('400 32px "Sci-Fae"');
+          if (!invisible || !hasSciFae) {
+            fontBuilder.applyLiveToGame(true);
+          } else if (!global.ACTIVE_FONT_FAMILY) {
+            global.ACTIVE_FONT_FAMILY = '"Sci-Fae", "SciFaePseudoScript10", "Orbitron", sans-serif';
+          }
+        } else if (!global.ACTIVE_FONT_FAMILY) {
+          global.ACTIVE_FONT_FAMILY = '"Sci-Fae", "SciFaePseudoScript10", "Orbitron", sans-serif';
         }
         if (global.SigilNookCanvas) global.SigilNookCanvas.init(engine);
+        await reportMountStep(2, 6);
+
         if (statPod) statPod.init(engine);
         if (global.StatCanvas) global.StatCanvas.init(engine);
         if (global.RoomStatCanvas) global.RoomStatCanvas.init(engine);
+        await reportMountStep(3, 6);
+
         if (deckSync) deckSync.initBridge();
         if (sidebarDeck) sidebarDeck.init(engine, state, audio);
         if (deckSync) deckSync.syncNativeStatPodWithGameState();
+        await reportMountStep(4, 6);
 
         if (polyRender) {
           polyRender.vibrancy = state.polyVibrancy;
@@ -233,6 +280,7 @@
         if (global.SigilResolver && global.GameState) {
           global.SigilResolver.evaluateSigils(global.GameState.board);
         }
+        await reportMountStep(5, 6);
 
         // Wire Puzzle-specific Tuning Labs inside the persistent HTML Tuning Drawer
         if (global.BorderTuningLab) global.BorderTuningLab.init(dom, audio);
@@ -246,11 +294,11 @@
         if (boardRenderer) boardRenderer.mount(engine);
         if (statPod?.topPodNode) {
           engine.setTopPod(statPod.topPodNode);
-          statPod.topPodNode.visible = true;
+          statPod.topPodNode.visible = !invisible;
         }
         if (global.NativeVitalityPod?.botPodNode) {
           engine.setBottomPod(global.NativeVitalityPod.botPodNode);
-          global.NativeVitalityPod.botPodNode.visible = true;
+          global.NativeVitalityPod.botPodNode.visible = !invisible;
         }
       }
 
@@ -278,6 +326,17 @@
       if (global.ResponsiveViewportAdapter?.syncViewport) {
         global.ResponsiveViewportAdapter.syncViewport();
       }
+      if (invisible) {
+        engine.baseLayerVisible = false;
+        engine.baseLayerAlpha = 1.0;
+        engine.hudFrameAlpha = 0.0;
+        engine.baseLayerInteractive = false;
+        if (engine.topPod) { engine.topPod.visible = false; engine.topPod.alpha = 0; }
+        if (engine.bottomPod) { engine.bottomPod.visible = false; engine.bottomPod.alpha = 0; }
+        engine._podFadeAlpha = 0;
+        engine._podsTargetHidden = true;
+      }
+      await reportMountStep(6, 6);
     },
 
     unmount(ctx = {}) {

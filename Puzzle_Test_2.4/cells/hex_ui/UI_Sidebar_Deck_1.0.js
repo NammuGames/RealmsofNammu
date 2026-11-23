@@ -231,7 +231,7 @@
       } else if (g?.inManifestMode) { global.SpellManifest?.handleUndo?.();
       } else if (g?.inTeleportMode) { global.SpellTeleport?.handleUndo ? global.SpellTeleport.handleUndo() : (g.cancelTeleport ? g.cancelTeleport() : global.SpellTeleport?.cancel?.());
       } else if (g?.inChargeMode) { global.SpellCharge?.handleUndo ? global.SpellCharge.handleUndo() : (global.SpellCharge?.cancel ? global.SpellCharge.cancel() : g.cancelCharge?.());
-      } else if (global.UndoManager) {
+      } else if (global.UndoManager && !global.POVManager?.isSpectatingOrMismatched?.()) {
         global.UndoManager.undoLastAction();
       }
       global.UIDeckSync?.syncMaterialsTrayWithGameState();
@@ -239,6 +239,7 @@
     }
 
     handleNav(dir) {
+      if (global.POVManager?.isSpectatingOrMismatched?.()) return;
       if (global.GameState) {
         global.GameState.moveDirection(dir);
         global.UIDeckSync?.syncMaterialsTrayWithGameState();
@@ -267,7 +268,7 @@
 
     handleRotate(dir) {
       const g = global.GameState;
-      if (!g || global.TurnManager?.isEndingTurn || global.TurnManager?.isStartingTurn || g.turnPhase === 'START_TURN' || g.turnPhase === 'END_TURN') return;
+      if (!g || global.POVManager?.isSpectatingOrMismatched?.() || global.TurnManager?.isEndingTurn || global.TurnManager?.isStartingTurn || g.turnPhase === 'START_TURN' || g.turnPhase === 'END_TURN') return;
       if (g.inTeleportMode && g.teleportHeldSigil) {
         g.rotatePiece(dir);
         global.UIDeckSync?.syncMaterialsTrayWithGameState();
@@ -295,7 +296,7 @@
         global.TurnConfirmPopup.confirm();
         return;
       }
-      if (global.InputController?.isAnyCanvasOpen?.() || global.TurnManager?.isEndingTurn) return;
+      if (global.InputController?.isAnyCanvasOpen?.() || global.TurnManager?.isEndingTurn || global.POVManager?.isSpectatingOrMismatched?.()) return;
       const g = global.GameState;
       if (!g) return;
       const cursorsEngaged = !!(
@@ -362,6 +363,7 @@
             if (!isModified) {
               global.GameSettingsCanvas.config.activePresetIndex = draft.index;
               global.GameSettingsCanvas.activePresetDraft = null;
+              global.GameSettingsCanvas.applySelectedPresetToArmedDraft?.(draft.targetPreset);
               global.GameSettingsCanvas.popColumn();
               return;
             }
@@ -369,6 +371,7 @@
               global.GameSettingsCanvas.createPresetCopyAndRename(draft.draftItem, (newCopy, newIdx) => {
                 global.GameSettingsCanvas.config.activePresetIndex = newIdx;
                 global.GameSettingsCanvas.activePresetDraft = null;
+                global.GameSettingsCanvas.applySelectedPresetToArmedDraft?.(newCopy);
                 global.GameSettingsCanvas.popColumn();
               });
               return;
@@ -378,6 +381,7 @@
               global.GameSettingsCanvas.config.activePresetIndex = newIdx;
               global.GameState?.showToast?.(`✦ Saved Preset: "${draft.targetPreset.name}"`);
               global.GameSettingsCanvas.activePresetDraft = null;
+              global.GameSettingsCanvas.applySelectedPresetToArmedDraft?.(draft.targetPreset);
               global.GameSettingsCanvas.popColumn();
               return;
             }
@@ -404,7 +408,7 @@
         return;
       }
       const g = global.GameState;
-      if (!g || global.TurnManager?.isEndingTurn || global.TurnManager?.isStartingTurn || g.turnPhase === 'START_TURN' || g.turnPhase === 'END_TURN') return;
+      if (!g || global.POVManager?.isSpectatingOrMismatched?.() || global.TurnManager?.isEndingTurn || global.TurnManager?.isStartingTurn || g.turnPhase === 'START_TURN' || g.turnPhase === 'END_TURN') return;
       if (g.inArchMode) {
         if (global.SpellArch?.isPlaced) {
           global.SpellArch.finalizeArch();

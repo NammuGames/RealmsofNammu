@@ -24,12 +24,13 @@
     const g = global.GameState;
     const net = global.NetworkP2PManager;
     const curIdx = g.activePlayerIndex || 0;
-    if (g.matchStarted && net && net.isSeatLocal?.(curIdx)) {
+    const pm = global.POVManager;
+    if (g.matchStarted && net && net.isSeatLocal?.(curIdx) && !pm?.isPeekingTurnStart?.()) {
       net.lastLocalActivePlayerIndex = curIdx;
     }
-    const povIdx = (net?.isConnected?.() && net.getDefaultPausedPlayerIndex)
-      ? net.getDefaultPausedPlayerIndex()
-      : curIdx;
+    const povIdx = pm
+      ? pm.getPOVIndex()
+      : ((net?.isConnected?.() && net.getDefaultPausedPlayerIndex) ? net.getDefaultPausedPlayerIndex() : curIdx);
     const povPlayerId = g.players?.[povIdx]?.id || (povIdx + 1);
 
     // Preserve the Log-Show snapshot's Turn/Score/Vitality while Player stays locked to this device's POV player
@@ -38,15 +39,21 @@
       return;
     }
 
-    const pendingDmg = (typeof g.getPendingDamage === 'function')
+    const povData = pm?.getPOVPlayer?.();
+    const isMismatched = (povIdx !== curIdx) || !!pm?.isPeekingTurnStart?.();
+    const dispHp = isMismatched && povData ? povData.hp : g.hp;
+    const dispPendingDmg = isMismatched ? 0 : ((typeof g.getPendingDamage === 'function')
       ? g.getPendingDamage()
-      : (g.pendingDamage !== undefined ? g.pendingDamage : 0);
-    const pendingHl = g.pendingHeal || 0;
-    global.NativeStatPod.setHp(g.hp, pendingDmg, pendingHl);
-    if (g.componentsBag) global.NativeStatPod.setComponents(g.componentsBag);
+      : (g.pendingDamage !== undefined ? g.pendingDamage : 0));
+    const dispPendingHl = isMismatched && povData ? (povData.pendingHeal || 0) : (g.pendingHeal || 0);
+    const dispBag = isMismatched && povData ? povData.componentsBag : g.componentsBag;
+    const dispScore = isMismatched && povData ? (povData.score || 0) : (g.score || 0);
+    const dispPts = isMismatched ? 0 : (g.getEstimatedPoints ? g.getEstimatedPoints() : (g.roundBonusPoints || 0));
 
-    const pts = g.getEstimatedPoints ? g.getEstimatedPoints() : (g.roundBonusPoints || 0);
-    const rawAve = (g.round > 0) ? (g.score / g.round) : 0;
+    global.NativeStatPod.setHp(dispHp, dispPendingDmg, dispPendingHl);
+    if (dispBag) global.NativeStatPod.setComponents(dispBag);
+
+    const rawAve = (g.round > 0) ? (dispScore / g.round) : 0;
     const ave = rawAve >= 100 ? Math.round(rawAve) : Number(rawAve.toFixed(rawAve >= 10 ? 1 : 2));
 
     const turnPid = g.currentPlayerId || 1;
@@ -54,8 +61,8 @@
       player: povPlayerId.toString(),
       turn: `P${turnPid}`,
       round: (g.round || 1).toString(),
-      points: pts.toString(),
-      score: (g.score || 0).toString(),
+      points: dispPts.toString(),
+      score: dispScore.toString(),
       ave: ave.toString()
     });
   };
@@ -89,7 +96,9 @@
     const cursorsEngaged = !!(g.inSigilStage || spellCursorsActive);
     const isPreRound1 = !g.matchStarted || g.isMatchStarting || g.isMatchEnding;
     const net = global.NetworkP2PManager;
-    const isSpectating = !!(net?.isConnected?.() && !net.isLocalPlayersTurn());
+    const isSpectating = global.POVManager
+      ? global.POVManager.isSpectatingOrMismatched()
+      : !!(net?.isConnected?.() && !net.isLocalPlayersTurn());
     if (!isPlaced && !cursorsEngaged && !g.isMaterialSelected && !isPreRound1 && !isSpectating) {
       g.isMaterialSelected = true;
       g.selectedTrayIndex = 0;
@@ -107,7 +116,7 @@
         uText.badge = '';
         uText.isSidebarButton = true;
         const uState = global.UndoManager?.getUndoNavState ? global.UndoManager.getUndoNavState() : null;
-        const canUndo = isCanvasOpen || (uState && uState.active) || deck.state?.rightSidebarActiveCol > 0;
+        const canUndo = isCanvasOpen || deck.state?.rightSidebarActiveCol > 0 || (!isSpectating && uState && uState.active);
         uText.titleColor = canUndo ? '#38bdf8' : '#64748b';
         btnReturn.setGhost(!canUndo);
         btnReturn.setHighlight(false);
@@ -121,7 +130,11 @@
     } else {
       for (let i = 1; i < Math.min(5, deck.leftButtonNodes?.length || 0); i++) {
         const btn = deck.leftButtonNodes[i];
-        if (btn) { btn.setGhost(false); const t = btn.getTrait('text'); if (t) t.titleColor = '#38bdf8'; }
+        if (btn) {
+          btn.setGhost(isSpectating);
+          const t = btn.getTrait('text');
+          if (t) t.titleColor = isSpectating ? '#64748b' : '#38bdf8';
+        }
       }
       if (deck.leftButtonNodes?.[5]) {
         const btnMenu = deck.leftButtonNodes[5], mText = btnMenu.getTrait('text');
@@ -142,9 +155,9 @@
       g.inSpellOverflow ||
       (g.activeMaterialMod === 'weave' && (g.weaveStep || 0) > 0) || global.SpellWeave?.inWeaveMode
     );
-    const povIdx = (net?.isConnected?.() && net.getDefaultPausedPlayerIndex)
-      ? net.getDefaultPausedPlayerIndex()
-      : (g.activePlayerIndex || 0);
+    const povIdx = global.POVManager
+      ? global.POVManager.getPOVIndex()
+      : ((net?.isConnected?.() && net.getDefaultPausedPlayerIndex) ? net.getDefaultPausedPlayerIndex() : (g.activePlayerIndex || 0));
     const activeBook = (isSpectating && g.players?.[povIdx]?.spellbook)
       ? g.players[povIdx].spellbook
       : (g.spellbook || []);
@@ -332,6 +345,16 @@
         btnEnd.setGhost(true); btnEnd.setHighlight(false);
         const t = btnEnd.getTrait('text'); if (t) t.titleColor = '#64748b';
       }
+    }
+
+    if (global.HexUIEngine?.forceGhostSidebars) {
+      const t5 = rightButtonNodes[5]?.getTrait?.('text');
+      if (t5) { t5.title = 'Confirm'; t5.hotkey = 'ENT'; t5.subtitle = ''; t5.badge = ''; }
+      [...(deck.leftButtonNodes || []), ...rightButtonNodes].forEach(btn => {
+        if (!btn) return;
+        btn.setGhost(true); btn.setHighlight(false);
+        const t = btn.getTrait?.('text'); if (t) t.titleColor = '#64748b';
+      });
     }
   };
 

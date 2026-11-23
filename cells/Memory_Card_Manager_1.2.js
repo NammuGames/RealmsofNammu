@@ -21,12 +21,13 @@
   proto.encodeMemoryCard = function() {
     if (global.GameSettingsCanvas?.config) this.savePresetsFromMenu(global.GameSettingsCanvas, { silent: true });
     const profile = this.getProfile();
+    const devicePeerId = global.NetworkP2PManager?.getDevicePeerId?.() || profile.devicePeerId || null;
     const presets = safeParse(localStorage.getItem(KEYS.PRESETS), { v: 1, playerCount: 1, customPresets: [] });
     const saves = this.getSavesMap();
 
     return [
       '@NAMMU_MC v1',
-      `@P ${JSON.stringify({ n: profile.name, t: profile.tag, u: profile.updatedAt })}`,
+      `@P ${JSON.stringify({ n: profile.name, t: profile.tag, dp: devicePeerId, u: profile.updatedAt })}`,
       `@CFG ${JSON.stringify({ pc: presets.playerCount || 1, ap: presets.activePresetId || null, ai: presets.activePresetIndex || 0, ps: presets.customPresets || [] })}`,
       `@SAV ${JSON.stringify(saves)}`
     ].join('\n');
@@ -62,7 +63,11 @@
     for (const line of lines) {
       if (line.startsWith('@P ')) {
         const p = safeParse(line.slice(3), null);
-        if (p) localStorage.setItem(KEYS.PROFILE, JSON.stringify({ v: 1, name: p.n || 'Player 1', tag: p.t || '001', updatedAt: Date.now() }));
+        if (p) {
+          const profPayload = { v: 1, name: p.n || 'Player 1', tag: p.t || '001', devicePeerId: p.dp || null, updatedAt: Date.now() };
+          localStorage.setItem(KEYS.PROFILE, JSON.stringify(profPayload));
+          if (p.dp) global.NetworkP2PManager?.setDevicePeerId?.(p.dp);
+        }
       } else if (line.startsWith('@CFG ')) {
         const c = safeParse(line.slice(5), null);
         if (c) {
@@ -79,6 +84,7 @@
         if (incoming && typeof incoming === 'object') {
           const merged = Object.assign(this.getSavesMap(), incoming);
           importedSaves = Object.keys(incoming).length;
+          this.normalizeSavesMap(merged, true);
           localStorage.setItem(KEYS.SAVES, JSON.stringify(merged));
         }
       }

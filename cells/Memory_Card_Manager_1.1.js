@@ -1,6 +1,7 @@
 /**
- * @fileoverview cells/Memory_Card_Manager_1.1.js - Saved Matches, Room Codes & Snapshot Restore (Part 2/3)
- * @description Attaches match snapshot capture/restore, Room Code lobby persistence, and Saved Matches CRUD.
+ * @fileoverview cells/Memory_Card_Manager_1.1.js - Saved Matches, Drafts, Tags & Restore (Part 2/3)
+ * @description Attaches match snapshot capture/restore, Draft CRUD & cloning, unique ### tag
+ * preservation, full roster metadata persistence, and Saved Matches CRUD.
  * Strictly adheres to the 500-line hard cap and underscore naming conventions.
  */
 
@@ -14,12 +15,50 @@
     return;
   }
 
-  const { KEYS, MAX_SAVES, safeParse, deepClone } = MCM._helpers;
+  const { KEYS, MAX_SAVES, safeParse, deepClone, inferMatchType } = MCM._helpers;
 
-  // ── MATCH SNAPSHOT SAVE / LIST / DELETE / RESTORE ─────────────────────────
+  function persistTrimmedSaves(saves) {
+    const ordered = Object.values(saves).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const trimmed = {};
+    ordered.slice(0, MAX_SAVES).forEach(s => { if (s?.id) trimmed[s.id] = s; });
+    localStorage.setItem(KEYS.SAVES, JSON.stringify(trimmed));
+    return trimmed;
+  }
+
+  function buildPresetSnapshotFromMatch(source) {
+    if (source?.presetSnapshot) return deepClone(source.presetSnapshot);
+    const mc = source?.matchConfig || {};
+    return {
+      id: `draft_preset_${Date.now()}`,
+      name: mc.presetName || source?.presetName || 'Custom',
+      isDefault: false,
+      match: {
+        materialComposition: mc.materialComposition || 'Random',
+        luckComposition: mc.luckComposition || 'Random',
+        startingSpells: mc.startingSpells ?? 0,
+        rounds: mc.rounds ?? source?.maxRounds ?? 144,
+        boardRadius: mc.boardRadius ?? source?.boardRadius ?? 6,
+        isEndless: !!(mc.isEndless ?? source?.isEndless)
+      },
+      luck: mc.luck ? deepClone(mc.luck) : null,
+      blight: mc.blight ? deepClone(mc.blight) : null
+    };
+  }
+
+  proto.getMatchTagLabel = function(entry) {
+    if (!entry) return 'Local 001';
+    const type = inferMatchType(entry);
+    const tag = entry.tagNumber || '001';
+    return `${type} ${tag}`;
+  };
+
+  // ── MATCH SNAPSHOT SAVE / DRAFT CRUD / LIST / DELETE / RESTORE ────────────
   proto.capturePuzzleState = function(matchId = null, opts = {}) {
     const g = global.GameState;
     if (!g || !g.matchStarted) return null;
+    if (global.POVManager?.isPeekingTurnStart?.()) {
+      return global.POVManager.withLiveTurnState(() => this.capturePuzzleState(matchId, opts));
+    }
 
     if (global.MatchOrchestrator?.saveActivePlayerFromState) {
       global.MatchOrchestrator.saveActivePlayerFromState(g);
@@ -40,28 +79,70 @@
       shapes: Array.from(cd.shapes?.values?.() || []).map(s => deepClone(s))
     } : null;
 
-    const existing = matchId ? this.getSaveById(matchId) : (this.activeMatchId ? this.getSaveById(this.activeMatchId) : null);
-    const id = matchId || this.activeMatchId || `puzzle_${Date.now()}`;
+    const net = global.NetworkP2PManager;
+    const isOnlineNet = !!(net && net.role !== 'offline');
+    const saves = this.getSavesMap();
+    let existing = matchId ? saves[matchId] : (this.activeMatchId ? saves[this.activeMatchId] : null);
+
+    const candidateCode = String(opts.roomCode || g.roomCode || existing?.roomCode || (isOnlineNet ? net.roomCode : '') || '').toUpperCase();
+    if (!existing && candidateCode) {
+      existing = Object.values(saves).find(s => !s?.isDraft && String(s?.roomCode || '').toUpperCase() === candidateCode) || null;
+    }
+
+    const id = existing?.id || matchId || this.activeMatchId || `puzzle_${Date.now()}`;
     this.activeMatchId = id;
 
-    const net = global.NetworkP2PManager;
-    const roomCode = opts.roomCode || g.roomCode || existing?.roomCode || net?.roomCode || this.generateUniqueRoomCode();
-    const matchName = opts.matchName || g.matchName || existing?.matchName || `Match ${roomCode}`;
-    const roleBadge = opts.roleBadge || g.roleBadge || (net?.role === 'host' ? 'Host' : (existing?.roleBadge || 'Player'));
-    const lobbyMode = opts.lobbyMode || g.lobbyMode || (net?.isConnected?.() ? 'Online' : (existing?.lobbyMode || 'Local'));
+    let matchType = opts.matchType;
+    if (!matchType) {
+      if (net?.role === 'host') matchType = 'Host';
+      else if (net?.role === 'guest') matchType = 'Guest';
+      else if (g.lobbyMode === 'Online' && (existing?.matchType === 'Host' || existing?.matchType === 'Guest')) {
+        matchType = existing.matchType;
+      } else {
+        matchType = 'Local';
+      }
+    }
+
+    const lobbyMode = (matchType === 'Host' || matchType === 'Guest') ? 'Online' : 'Local';
+    const roleBadge = (matchType === 'Host') ? 'Host' : 'Player';
+    const roomCode = candidateCode || (lobbyMode === 'Online' ? this.generateUniqueRoomCode() : '');
+    const matchName = opts.matchName || g.matchName || existing?.matchName || (roomCode ? `Match ${roomCode}` : 'Saved Match');
+    const tagNumber = existing?.tagNumber || this.allocateMatchTagNumber(saves);
+
+    let rosterMeta = existing?.rosterMeta ? deepClone(existing.rosterMeta) : null;
+    if (isOnlineNet && typeof net.getRosterMetadata === 'function') {
+      const liveRoster = net.getRosterMetadata();
+      if (liveRoster && (liveRoster.seatOwners?.length || liveRoster.roomSeats?.length)) {
+        rosterMeta = liveRoster;
+      }
+    }
+
+    const workingPreset = global.GameSettingsCanvas?.getActiveWorkingPreset?.();
+    const presetSnapshot = existing?.presetSnapshot
+      ? deepClone(existing.presetSnapshot)
+      : (workingPreset ? deepClone(workingPreset) : null);
 
     g.roomCode = roomCode;
     g.matchName = matchName;
+    g.matchType = matchType;
+    g.tagNumber = tagNumber;
     g.roleBadge = roleBadge;
     g.lobbyMode = lobbyMode;
 
     return {
       id,
       game: 'puzzle',
+      name: matchName,
       matchName,
+      matchType,
+      tagNumber,
+      isDraft: false,
+      matchStarted: true,
+      isLobbyPlaceholder: false,
       roomCode,
       roleBadge,
       lobbyMode,
+      createdAt: existing?.createdAt || Date.now(),
       updatedAt: Date.now(),
       round: g.round,
       maxRounds: g.maxRounds,
@@ -87,8 +168,10 @@
       roundBonusPoints: g.roundBonusPoints || 0,
       archZones: deepClone(g.archZones || []),
       fortifiedTiles: Array.from(g.fortifiedTiles || []),
-      matchConfig: deepClone(g.matchConfig || null),
+      matchConfig: deepClone(g.matchConfig || existing?.matchConfig || null),
+      presetSnapshot,
       presetName: g.matchConfig?.presetName || existing?.presetName || 'Meditate',
+      rosterMeta,
       boardTiles,
       players: deepClone(g.players || []),
       disease: diseaseData,
@@ -99,22 +182,130 @@
   proto.findSaveByRoomCode = function(roomCode) {
     const code = String(roomCode || '').trim().toUpperCase();
     if (!code) return null;
-    return this.listSaves().find(s => String(s?.roomCode || '').toUpperCase() === code) || null;
+    return this.listSaves().find(s => !s?.isDraft && String(s?.roomCode || '').toUpperCase() === code) || null;
   };
 
+  /** Creates a new editable Draft card with this device's next unique ### tag. */
+  proto.createDraft = function(opts = {}) {
+    const cleanName = String(opts.name || opts.matchName || '').trim();
+    if (!cleanName) return null;
+    const saves = this.getSavesMap();
+    const id = opts.id || `draft_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const tagNumber = this.allocateMatchTagNumber(saves);
+    const presetSnap = opts.presetSnapshot ? deepClone(opts.presetSnapshot) : buildPresetSnapshotFromMatch(opts);
+    const mc = opts.matchConfig ? deepClone(opts.matchConfig) : (presetSnap?.match ? deepClone({ ...presetSnap.match, presetName: presetSnap.name }) : null);
+    const now = Date.now();
+
+    const draft = {
+      id,
+      game: 'puzzle',
+      name: cleanName,
+      matchName: cleanName,
+      matchType: 'Draft',
+      tagNumber,
+      isDraft: true,
+      matchStarted: false,
+      isLobbyPlaceholder: false,
+      roomCode: '',
+      roleBadge: 'Player',
+      lobbyMode: 'Local',
+      createdAt: now,
+      updatedAt: now,
+      round: 1,
+      maxRounds: mc?.rounds ?? presetSnap?.match?.rounds ?? 144,
+      isEndless: !!(mc?.isEndless ?? presetSnap?.match?.isEndless),
+      boardRadius: mc?.boardRadius ?? presetSnap?.match?.boardRadius ?? 6,
+      playerCount: Math.max(1, Math.min(6, Number(opts.playerCount) || 1)),
+      presetName: opts.presetName || mc?.presetName || presetSnap?.name || 'Meditate',
+      matchConfig: mc,
+      presetSnapshot: presetSnap,
+      rosterMeta: null,
+      boardTiles: []
+    };
+
+    saves[id] = draft;
+    persistTrimmedSaves(saves);
+    this.markUnsaved();
+    return draft;
+  };
+
+  /** Updates an existing Draft card's editable settings while preserving its id and ### tag. */
+  proto.updateDraft = function(draftId, patch = {}) {
+    if (!draftId) return null;
+    const saves = this.getSavesMap();
+    const existing = saves[draftId];
+    if (!existing || existing.matchType !== 'Draft') return null;
+
+    const nextName = patch.name !== undefined || patch.matchName !== undefined
+      ? String(patch.name ?? patch.matchName ?? '').trim() || existing.matchName
+      : existing.matchName;
+
+    const updated = Object.assign({}, existing, {
+      name: nextName,
+      matchName: nextName,
+      playerCount: patch.playerCount !== undefined ? Math.max(1, Math.min(6, Number(patch.playerCount) || 1)) : existing.playerCount,
+      presetName: patch.presetName !== undefined ? patch.presetName : existing.presetName,
+      matchConfig: patch.matchConfig !== undefined ? deepClone(patch.matchConfig) : existing.matchConfig,
+      presetSnapshot: patch.presetSnapshot !== undefined ? deepClone(patch.presetSnapshot) : existing.presetSnapshot,
+      maxRounds: patch.matchConfig?.rounds ?? patch.presetSnapshot?.match?.rounds ?? existing.maxRounds,
+      isEndless: !!(patch.matchConfig?.isEndless ?? patch.presetSnapshot?.match?.isEndless ?? existing.isEndless),
+      boardRadius: patch.matchConfig?.boardRadius ?? patch.presetSnapshot?.match?.boardRadius ?? existing.boardRadius,
+      updatedAt: Date.now()
+    });
+
+    saves[draftId] = updated;
+    persistTrimmedSaves(saves);
+    this.markUnsaved();
+    return updated;
+  };
+
+  /** Clones any Draft/Local/Host/Guest match's settings into a brand-new editable Draft card. */
+  proto.cloneMatchToDraft = function(sourceId, newName) {
+    const source = this.getSaveById(sourceId);
+    if (!source) return null;
+    const cleanName = String(newName || `${source.matchName || source.name || 'Match'} (Copy)`).trim();
+    const presetSnapshot = buildPresetSnapshotFromMatch(source);
+    const matchConfig = source.matchConfig ? deepClone(source.matchConfig) : deepClone({ ...presetSnapshot.match, presetName: presetSnapshot.name });
+    return this.createDraft({
+      name: cleanName,
+      playerCount: source.playerCount || 1,
+      presetName: source.presetName || presetSnapshot.name || 'Custom',
+      matchConfig,
+      presetSnapshot
+    });
+  };
+
+  /** Promotes an armed Draft card in place to a started Local/Host match, preserving its ### tag. */
+  proto.promoteDraftToStarted = function(draftId, opts = {}) {
+    if (!draftId) return this.saveActivePuzzleMatch(null, opts);
+    this.activeMatchId = draftId;
+    return this.saveActivePuzzleMatch(draftId, opts);
+  };
+
+  /** Guests no longer persist premature lobby cards before match start; only started matches save. */
   proto.saveJoinedLobbyMatch = function(info = {}) {
+    if (!info || !info.matchStarted) return null;
     const code = String(info.roomCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
     if (!code) return null;
     const saves = this.getSavesMap();
-    const existing = Object.values(saves).find(s => String(s?.roomCode || '').toUpperCase() === code) || null;
+    const existing = Object.values(saves).find(s => !s?.isDraft && String(s?.roomCode || '').toUpperCase() === code) || null;
     const id = existing?.id || `match_${code}`;
+    const tagNumber = existing?.tagNumber || this.allocateMatchTagNumber(saves);
+    const matchName = info.matchName || existing?.matchName || `Match ${code}`;
     const snap = Object.assign({}, existing || {}, {
       id,
       game: 'puzzle',
-      matchName: info.matchName || existing?.matchName || `Match ${code}`,
+      name: matchName,
+      matchName,
+      matchType: 'Guest',
+      tagNumber,
+      isDraft: false,
+      matchStarted: true,
+      isLobbyPlaceholder: false,
       roomCode: code,
       roleBadge: 'Player',
       lobbyMode: 'Online',
+      createdAt: existing?.createdAt || Date.now(),
       updatedAt: Date.now(),
       round: existing?.round || 1,
       maxRounds: info.matchConfig?.rounds ?? existing?.maxRounds ?? 144,
@@ -123,15 +314,12 @@
       playerCount: info.playerCount || existing?.playerCount || 2,
       presetName: info.presetName || existing?.presetName || 'Meditate',
       matchConfig: info.matchConfig ? deepClone(info.matchConfig) : (existing?.matchConfig || null),
-      boardTiles: existing?.boardTiles || [],
-      isLobbyPlaceholder: !existing?.boardTiles?.length
+      rosterMeta: info.rosterMeta ? deepClone(info.rosterMeta) : (existing?.rosterMeta || null),
+      boardTiles: existing?.boardTiles || []
     });
 
     saves[id] = snap;
-    const ordered = Object.values(saves).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    const trimmed = {};
-    ordered.slice(0, MAX_SAVES).forEach(s => { trimmed[s.id] = s; });
-    localStorage.setItem(KEYS.SAVES, JSON.stringify(trimmed));
+    persistTrimmedSaves(saves);
     this.markUnsaved();
     return snap;
   };
@@ -143,23 +331,22 @@
     const code = String(snap.roomCode || '').toUpperCase();
     if (code) {
       Object.keys(saves).forEach((k) => {
-        if (k !== snap.id && String(saves[k]?.roomCode || '').toUpperCase() === code) {
+        const entry = saves[k];
+        if (k !== snap.id && !entry?.isDraft && String(entry?.roomCode || '').toUpperCase() === code) {
+          if (!snap.tagNumber && entry?.tagNumber) snap.tagNumber = entry.tagNumber;
           delete saves[k];
         }
       });
     }
     saves[snap.id] = snap;
-
-    const ordered = Object.values(saves).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    const trimmed = {};
-    ordered.slice(0, MAX_SAVES).forEach(s => { trimmed[s.id] = s; });
-    localStorage.setItem(KEYS.SAVES, JSON.stringify(trimmed));
+    persistTrimmedSaves(saves);
     this.markUnsaved();
     return snap;
   };
 
   proto.getSavesMap = function() {
-    return safeParse(localStorage.getItem(KEYS.SAVES), {});
+    const raw = safeParse(localStorage.getItem(KEYS.SAVES), {});
+    return this.normalizeSavesMap(raw, true);
   };
 
   proto.getSaveById = function(id) {
@@ -180,22 +367,26 @@
     if (this.activeMatchId === matchId) this.activeMatchId = null;
     const gsc = global.GameSettingsCanvas;
     if (gsc && gsc.selectedSavedMatchId === matchId) gsc.selectedSavedMatchId = null;
+    if (gsc && gsc.armedDraftId === matchId) gsc.armedDraftId = null;
     this.markUnsaved();
     return true;
   };
+  proto.deleteMatch = proto.deleteSavedMatch;
 
   proto.restorePuzzleState = function(snap) {
     const g = global.GameState;
-    if (!snap || !g) return false;
+    if (!snap || !g || snap.isDraft || snap.matchType === 'Draft') return false;
 
     if (global.GameSettingsCanvas?.isOpen?.()) global.GameSettingsCanvas.close();
     global.BoardRenderer?.cancelMatchStartAnim?.();
 
     g.matchConfig = snap.matchConfig ? deepClone(snap.matchConfig) : null;
-    g.matchName = snap.matchName || 'Saved Match';
+    g.matchName = snap.matchName || snap.name || 'Saved Match';
+    g.matchType = inferMatchType(snap);
+    g.tagNumber = snap.tagNumber || '';
     g.roomCode = snap.roomCode || '';
-    g.roleBadge = (global.NetworkP2PManager?.role === 'guest') ? 'Player' : (snap.roleBadge || 'Player');
-    g.lobbyMode = snap.lobbyMode || 'Local';
+    g.roleBadge = (global.NetworkP2PManager?.role === 'guest') ? 'Player' : (snap.roleBadge || (g.matchType === 'Host' ? 'Host' : 'Player'));
+    g.lobbyMode = (g.matchType === 'Host' || g.matchType === 'Guest') ? 'Online' : (snap.lobbyMode || 'Local');
     g.isEndless = !!snap.isEndless;
     g.maxRounds = snap.maxRounds ?? 144;
     g.totalRounds = g.maxRounds;
@@ -283,6 +474,7 @@
       global.TurnLogManager.importState(snap.turnLog);
     }
     g.evaluateSigils?.();
+    global.POVManager?.onMatchRestored?.(g.activePlayerIndex || 0);
     g.syncUI();
     global.UICardsDeck?.syncMaterialsQueueColumn?.();
     global.UICardsDeck?.syncSpellbookColumn?.();

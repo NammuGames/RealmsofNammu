@@ -108,6 +108,14 @@
     }
 
     close(silent = false, onDone = null) {
+      let isSilent = !!silent;
+      let immediate = false;
+      let doneCb = onDone;
+      if (silent && typeof silent === 'object') {
+        isSilent = !!silent.silent;
+        immediate = !!silent.immediate;
+        doneCb = silent.onDone || onDone;
+      }
       if ((!this.active && !this.containerNode?.visible) || this.isAnimating()) return;
       const wasSelect = !!this.playerSelectCallback;
       const selOpts = this.playerSelectOptions || {};
@@ -127,14 +135,14 @@
         }
         global.UIDeckSync?.syncMaterialsTrayWithGameState?.();
         global.BoardRenderer?.render?.();
-        if (wasSelect && selOpts.returnToPause && typeof onDone !== 'function') {
+        if (wasSelect && selOpts.returnToPause && typeof doneCb !== 'function') {
           global.GameSettingsCanvas?.openInGamePause?.();
           return;
         }
-        if (typeof onDone === 'function') onDone();
+        if (typeof doneCb === 'function') doneCb();
       };
-      if (!silent) global.AudioSynth?.playClick?.();
-      if (global.TweenOrchestrator?.collapseFrame && this.containerNode?.visible) {
+      if (!isSilent) global.AudioSynth?.playClick?.();
+      if (!immediate && global.TweenOrchestrator?.collapseFrame && this.containerNode?.visible) {
         global.TweenOrchestrator.collapseFrame(this.containerNode, 'native-bot-stat-pod', {
           onComplete: doCloseCleanup
         });
@@ -149,30 +157,45 @@
       }
     }
 
+    refreshIfOpen() {
+      if (!this.active) return;
+      if (this.listTrait) {
+        this._prevScroll = this.listTrait.scrollOffset || 0;
+        this._prevTarget = this.listTrait.targetScrollOffset || 0;
+      }
+      this.buildScene();
+      global.BoardRenderer?.render?.();
+    }
+
     goBack() { if (this.isAnimating()) return true; if (this.active) { this.close(); return true; } return false; }
 
     getSortedPlayers() {
       const g = global.GameState || {};
-      global.MatchOrchestrator?.saveActivePlayerFromState?.(g);
+      const isPeeking = !!global.POVManager?.isPeekingTurnStart?.();
+      if (!isPeeking) global.MatchOrchestrator?.saveActivePlayerFromState?.(g);
       const round = Math.max(1, g.round || 1);
       const activeId = g.currentPlayerId || 1;
-      const pts = g.getEstimatedPoints ? g.getEstimatedPoints() : (g.roundBonusPoints || 0);
-      const livePending = (typeof g.getPendingDamage === 'function') ? g.getPendingDamage() : (g.pendingDamage || 0);
+      const turnStartStats = isPeeking ? global.POVManager?._turnStartSnapshot?.stats : null;
+      const pts = isPeeking ? 0 : (g.getEstimatedPoints ? g.getEstimatedPoints() : (g.roundBonusPoints || 0));
+      const livePending = isPeeking ? 0 : ((typeof g.getPendingDamage === 'function') ? g.getPendingDamage() : (g.pendingDamage || 0));
 
       const sourceList = (Array.isArray(g.players) && g.players.length > 0)
         ? g.players
         : [{ id: 1, name: 'Player 1', hp: g.hp ?? 12, maxHp: g.maxHp || 12, score: g.score || 0, componentsBag: g.componentsBag || [] }];
 
-      const all = sourceList.map(p => {
+      const all = sourceList.map((p, idx) => {
         const isActive = (p.id === activeId);
-        const score = isActive ? (g.score || 0) : (p.score || 0);
+        const useTurnStart = isActive && isPeeking && turnStartStats;
+        const score = useTurnStart ? (turnStartStats.score || 0) : (isActive ? (g.score || 0) : (p.score || 0));
         const rawAve = score / round;
         const average = rawAve >= 100 ? Math.round(rawAve) : Number(rawAve.toFixed(rawAve >= 10 ? 1 : 2));
         return {
-          id: p.id, name: p.name || `Player ${p.id}`,
-          hp: isActive ? (g.hp ?? 12) : (p.hp ?? 12), maxHp: p.maxHp || 12,
-          pendingDamage: isActive ? livePending : 0, pendingHeal: isActive ? (g.pendingHeal || 0) : (p.pendingHeal || 0),
-          componentsBag: isActive ? (g.componentsBag || []) : (p.componentsBag || []),
+          id: p.id, seatIndex: idx, name: p.name || `Player ${p.id}`,
+          hp: useTurnStart ? (turnStartStats.hp ?? 12) : (isActive ? (g.hp ?? 12) : (p.hp ?? 12)),
+          maxHp: p.maxHp || 12,
+          pendingDamage: isActive ? livePending : 0,
+          pendingHeal: useTurnStart ? (turnStartStats.pendingHeal || 0) : (isActive ? (g.pendingHeal || 0) : (p.pendingHeal || 0)),
+          componentsBag: useTurnStart ? (turnStartStats.componentsBag || []) : (isActive ? (g.componentsBag || []) : (p.componentsBag || [])),
           points: isActive ? pts : 0, score, average
         };
       });

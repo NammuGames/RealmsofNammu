@@ -1,7 +1,7 @@
 /**
- * @fileoverview cells/Network_P2P_Manager_1.0.js - Core State, Seat Queries & Transport Bridge (Part 1/3)
- * @description Defines NetworkP2PManagerClass core state, local/remote seat ownership helpers,
- * encrypted WSS transport binding, heartbeat/pruning, and clean disconnect lifecycle.
+ * @fileoverview cells/Network_P2P_Manager_1.0.js - Core State, Seat Queries & Transport Bridge (Part 1/5)
+ * @description Defines NetworkP2PManagerClass core state, persistent device peerId, strict
+ * local/remote seat ownership & presence helpers, WSS transport binding, and heartbeat/pruning.
  * Strictly adheres to the 500-line hard cap and underscore naming conventions.
  */
 
@@ -9,6 +9,7 @@
   'use strict';
 
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const DEVICE_PEER_KEY = 'nammu_p2p_v1_device_peer_id';
 
   function makeRoomCode(len = 4) {
     let out = '';
@@ -22,21 +23,50 @@
     return `p_${makeRoomCode(10).toLowerCase()}`;
   }
 
+  function loadOrCreatePeerId() {
+    try {
+      const saved = global.localStorage?.getItem(DEVICE_PEER_KEY);
+      if (saved && /^p_[a-z0-9]{6,20}$/.test(saved)) return saved;
+      const fresh = makePeerId();
+      global.localStorage?.setItem(DEVICE_PEER_KEY, fresh);
+      return fresh;
+    } catch {
+      return makePeerId();
+    }
+  }
+
+  function saveDevicePeerId(peerId) {
+    if (!peerId || typeof peerId !== 'string') return false;
+    try {
+      global.localStorage?.setItem(DEVICE_PEER_KEY, peerId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   class NetworkP2PManagerClass {
     constructor() {
       this.transport = null;
-      this.myPeerId = makePeerId();
+      this.myPeerId = loadOrCreatePeerId();
       this.role = 'offline'; // 'offline' | 'host' | 'guest'
       this.roomCode = '';
       this.hostPeerId = null;
       this.connections = new Map(); // peerId -> { peer, open: true, lastSeen }
+      this.onlinePeerIds = new Set(); // live peerIds currently online in room
       this.peerMeta = new Map();    // peerId -> { name, seatIndex, localPlayerCount }
-      this.seatOwners = [];         // seatIndex -> peerId | null
+      this.seatOwners = [];         // seatIndex -> peerId | null (locked once matchStarted)
       this.roomSeats = [];          // [{ seatIndex, playerNum, name, ownerPeerId, isHost }]
       this.localPlayerCount = 1;
       this.hostLocalPlayerCount = 1;
       this.searchingCode = '';
       this.searchStatus = '';
+      this.roomLocked = false;
+      this.matchStarted = false;
+      this.hostOnline = false;
+      this.joinRejectedReason = '';
+      this.pendingMatchStartSnap = null;
+      this._awaitingEnterMatch = false;
       this.turnOnlySync = true;     // Turn-only state sync for public WSS relay reliability
       this.dom = {};
 
@@ -55,6 +85,21 @@
       this._applyingRemote = false;
       this._lastCursorEmitMs = 0;
       this._unloadBound = false;
+    }
+
+    getDevicePeerId() {
+      if (!this.myPeerId) this.myPeerId = loadOrCreatePeerId();
+      return this.myPeerId;
+    }
+
+    setDevicePeerId(peerId) {
+      if (!peerId || typeof peerId !== 'string') return false;
+      this.myPeerId = peerId;
+      return saveDevicePeerId(peerId);
+    }
+
+    _isMatchActive() {
+      return !!(this.matchStarted || global.GameState?.matchStarted);
     }
 
     init(dom = {}) {
@@ -78,7 +123,7 @@
     }
 
     isConnected() {
-      return this.role === 'host' || (this.role === 'guest' && this.connections.size > 0);
+      return this.role === 'host' || (this.role === 'guest' && this.hostOnline && this.connections.size > 0);
     }
 
     isHost() {
@@ -88,8 +133,31 @@
     isSeatLocal(seatIndex) {
       if (this.role === 'offline') return true;
       const owner = this.seatOwners[seatIndex];
+      if (this._isMatchActive()) {
+        return !!(owner && owner === this.myPeerId);
+      }
       if (!owner) return this.role === 'host';
       return owner === this.myPeerId;
+    }
+
+    isSeatRemote(seatIndex) {
+      if (this.role === 'offline') return false;
+      return !this.isSeatLocal(seatIndex);
+    }
+
+    isSeatOnline(seatIndex) {
+      if (this.role === 'offline') return true;
+      const owner = this.seatOwners[seatIndex];
+      if (!owner) return false;
+      if (owner === this.myPeerId) return this.role !== 'offline';
+      if (this.role === 'host') return this.connections.has(owner);
+      return !!(this.hostOnline && (owner === this.hostPeerId || this.onlinePeerIds.has(owner)));
+    }
+
+    isHostOnline() {
+      if (this.role === 'offline') return true;
+      if (this.role === 'host') return !!this.transport?.connected;
+      return !!(this.hostOnline && this.hostPeerId && this.connections.has(this.hostPeerId));
     }
 
     isSeatOnlineRemote(seatIndex) {
@@ -110,7 +178,7 @@
       return cur;
     }
 
-    /** Returns true when offline OR when the active Puzzle turn belongs to this peer. */
+    /** Returns true when offline OR when the active Puzzle turn strictly belongs to this peer. */
     isLocalPlayersTurn() {
       if (this.role === 'offline') return true;
       const g = global.GameState;
@@ -165,8 +233,11 @@
       if (existing) existing.lastSeen = Date.now();
 
       if (msg.type === 'HEARTBEAT') {
-        if (this.role === 'host' && !existing && this.peerMeta.has(msg.from)) {
+        if (this.role === 'host' && !existing && (this.peerMeta.has(msg.from) || this.seatOwners.includes(msg.from))) {
           this.connections.set(msg.from, { peer: msg.from, open: true, lastSeen: Date.now() });
+          this.onlinePeerIds.add(msg.from);
+          this._broadcastRoster?.();
+          this._notifyLobbyUpdate?.();
         }
         return;
       }
@@ -181,14 +252,20 @@
 
     _handlePeerRemoved(peerId) {
       const had = this.connections.delete(peerId);
-      this.peerMeta.delete(peerId);
-      if (!had) return;
+      this.onlinePeerIds.delete(peerId);
+      const matchActive = this._isMatchActive();
+      if (!matchActive) this.peerMeta.delete(peerId);
+      if (!had && !(this.role === 'guest' && peerId === this.hostPeerId)) return;
       if (this.role === 'host') {
-        this._rebuildSeatRoster?.();
+        if (!matchActive) this._rebuildSeatRoster?.();
         this._broadcastRoster?.();
       } else if (peerId === this.hostPeerId) {
-        this.seatOwners = this.seatOwners.map(id => (id === peerId ? null : id));
-        global.GameState?.showToast?.('🔌 Host disconnected from room');
+        this.hostOnline = false;
+        if (matchActive) {
+          this._handleHostDroppedInMatch?.();
+        } else {
+          global.GameState?.showToast?.('🔌 Host disconnected from room');
+        }
       }
       this._updateDrawerUI?.();
       this._notifyLobbyUpdate?.();
@@ -199,21 +276,28 @@
       this._heartbeatTimer = setInterval(() => {
         if (!this.transport?.connected || this.role === 'offline') return;
         this._publishRoom({ type: 'HEARTBEAT' });
+        const now = Date.now();
         if (this.role === 'host') {
-          const now = Date.now();
+          const matchActive = this._isMatchActive();
           let pruned = false;
           this.connections.forEach((conn, pid) => {
             if (now - (conn.lastSeen || 0) > 45000) {
               this.connections.delete(pid);
-              this.peerMeta.delete(pid);
+              this.onlinePeerIds.delete(pid);
+              if (!matchActive) this.peerMeta.delete(pid);
               pruned = true;
             }
           });
           if (pruned) {
-            this._rebuildSeatRoster?.();
+            if (!matchActive) this._rebuildSeatRoster?.();
             this._broadcastRoster?.();
             this._updateDrawerUI?.();
             this._notifyLobbyUpdate?.();
+          }
+        } else if (this.role === 'guest' && this.hostOnline && this.hostPeerId) {
+          const hostConn = this.connections.get(this.hostPeerId);
+          if (hostConn && now - (hostConn.lastSeen || 0) > 45000) {
+            this._handlePeerRemoved(this.hostPeerId);
           }
         }
       }, 15000);
@@ -228,6 +312,8 @@
       if (this._pendingSync) { clearInterval(this._pendingSync.timer); this._pendingSync = null; }
       this._lastRemoteSyncKey = '';
       this.connections.clear();
+      this.onlinePeerIds.clear();
+      this.hostOnline = false;
       if (this.transport) {
         try { this.transport.disconnect(); } catch {}
         this.transport = null;
@@ -235,6 +321,6 @@
     }
   }
 
-  NetworkP2PManagerClass._helpers = { makeRoomCode, makePeerId };
+  NetworkP2PManagerClass._helpers = { makeRoomCode, makePeerId, loadOrCreatePeerId, saveDevicePeerId };
   global.NetworkP2PManagerClass = NetworkP2PManagerClass;
 })(typeof window !== 'undefined' ? window : this);

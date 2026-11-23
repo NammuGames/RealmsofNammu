@@ -41,6 +41,18 @@
     return null;
   };
 
+  Proto.hasForegroundOverlay = function() {
+    return !!(this.foregroundOverlay && this.foregroundOverlay.visible);
+  };
+
+  Proto.hitTestActiveLayer = function(sx, sy) {
+    if (this.hasForegroundOverlay()) {
+      return this.hitTestNode(this.foregroundRoot, sx, sy);
+    }
+    if (!this.baseLayerVisible || !this.baseLayerInteractive) return null;
+    return this.hitTestNode(this.root, sx, sy);
+  };
+
   Proto._findScrollableList = function(hit) {
     if (!hit) return null;
     const isScrollable = (l) => !!(l && l.allowManualScroll && (typeof l.getMaxScroll !== 'function' || l.getMaxScroll() > 0));
@@ -107,7 +119,11 @@
       if (isSyntheticMouse(e)) return;
       const pos = getPos(e);
       let hit = null;
-      if (global.GameSettingsRenamePopup?.isOpen?.() && global.GameSettingsRenamePopup.frameNode) {
+      if (this.hasForegroundOverlay()) {
+        hit = this.hitTestNode(this.foregroundRoot, pos.x, pos.y);
+      } else if (!this.baseLayerVisible || !this.baseLayerInteractive) {
+        hit = null;
+      } else if (global.GameSettingsRenamePopup?.isOpen?.() && global.GameSettingsRenamePopup.frameNode) {
         hit = this.hitTestNode(global.GameSettingsRenamePopup.frameNode, pos.x, pos.y);
       } else if (global.TurnConfirmPopup?.isOpen?.() && global.TurnConfirmPopup.frameNode) {
         hit = this.hitTestNode(global.TurnConfirmPopup.frameNode, pos.x, pos.y);
@@ -135,25 +151,27 @@
     this.canvas.addEventListener('mousedown', (e) => {
       if (isSyntheticMouse(e)) return;
       const pos = getPos(e);
-      if (global.GameSettingsRenamePopup?.isOpen?.() && global.GameSettingsRenamePopup.frameNode) {
-        const frame = global.GameSettingsRenamePopup.frameNode;
-        const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
-        if (!hitPopup) {
-          if (!frame.animating) global.GameSettingsRenamePopup.cancel();
-          return;
-        }
-      } else if (global.TurnConfirmPopup?.isOpen?.() && global.TurnConfirmPopup.frameNode) {
-        const frame = global.TurnConfirmPopup.frameNode;
-        const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
-        const btnPlace = global.UISidebarDeck?.rightButtonNodes?.[4];
-        const btnEnd = global.UISidebarDeck?.rightButtonNodes?.[5];
-        const hitConfirmBtn = !!((btnPlace && btnPlace.containsScreenPoint?.(pos.x, pos.y)) || (btnEnd && !btnEnd.ghost && btnEnd.containsScreenPoint?.(pos.x, pos.y)));
-        if (!hitPopup && !hitConfirmBtn) {
-          if (!frame.animating) global.TurnConfirmPopup.close();
-          return;
+      if (!this.hasForegroundOverlay() && this.baseLayerVisible && this.baseLayerInteractive) {
+        if (global.GameSettingsRenamePopup?.isOpen?.() && global.GameSettingsRenamePopup.frameNode) {
+          const frame = global.GameSettingsRenamePopup.frameNode;
+          const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
+          if (!hitPopup) {
+            if (!frame.animating) global.GameSettingsRenamePopup.cancel();
+            return;
+          }
+        } else if (global.TurnConfirmPopup?.isOpen?.() && global.TurnConfirmPopup.frameNode) {
+          const frame = global.TurnConfirmPopup.frameNode;
+          const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
+          const btnPlace = global.UISidebarDeck?.rightButtonNodes?.[4];
+          const btnEnd = global.UISidebarDeck?.rightButtonNodes?.[5];
+          const hitConfirmBtn = !!((btnPlace && btnPlace.containsScreenPoint?.(pos.x, pos.y)) || (btnEnd && !btnEnd.ghost && btnEnd.containsScreenPoint?.(pos.x, pos.y)));
+          if (!hitPopup && !hitConfirmBtn) {
+            if (!frame.animating) global.TurnConfirmPopup.close();
+            return;
+          }
         }
       }
-      const hit = this.hitTestNode(this.root, pos.x, pos.y);
+      const hit = this.hitTestActiveLayer(pos.x, pos.y);
       this.pressedNode = hit;
       if (hit) {
         this.lastClickedNode = hit;
@@ -167,25 +185,27 @@
       const t = e.touches && e.touches[0];
       if (!t || e.touches.length !== 1) { clearTouchScroll(); return; }
       const pos = getPos(t);
-      if (global.GameSettingsRenamePopup?.isOpen?.() && global.GameSettingsRenamePopup.frameNode) {
-        const frame = global.GameSettingsRenamePopup.frameNode;
-        const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
-        if (!hitPopup) {
-          if (!frame.animating) global.GameSettingsRenamePopup.cancel();
-          return;
-        }
-      } else if (global.TurnConfirmPopup?.isOpen?.() && global.TurnConfirmPopup.frameNode) {
-        const frame = global.TurnConfirmPopup.frameNode;
-        const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
-        const btnPlace = global.UISidebarDeck?.rightButtonNodes?.[4];
-        const btnEnd = global.UISidebarDeck?.rightButtonNodes?.[5];
-        const hitConfirmBtn = !!((btnPlace && btnPlace.containsScreenPoint?.(pos.x, pos.y)) || (btnEnd && !btnEnd.ghost && btnEnd.containsScreenPoint?.(pos.x, pos.y)));
-        if (!hitPopup && !hitConfirmBtn) {
-          if (!frame.animating) global.TurnConfirmPopup.close();
-          return;
+      if (!this.hasForegroundOverlay() && this.baseLayerVisible && this.baseLayerInteractive) {
+        if (global.GameSettingsRenamePopup?.isOpen?.() && global.GameSettingsRenamePopup.frameNode) {
+          const frame = global.GameSettingsRenamePopup.frameNode;
+          const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
+          if (!hitPopup) {
+            if (!frame.animating) global.GameSettingsRenamePopup.cancel();
+            return;
+          }
+        } else if (global.TurnConfirmPopup?.isOpen?.() && global.TurnConfirmPopup.frameNode) {
+          const frame = global.TurnConfirmPopup.frameNode;
+          const hitPopup = this.hitTestNode(frame, pos.x, pos.y);
+          const btnPlace = global.UISidebarDeck?.rightButtonNodes?.[4];
+          const btnEnd = global.UISidebarDeck?.rightButtonNodes?.[5];
+          const hitConfirmBtn = !!((btnPlace && btnPlace.containsScreenPoint?.(pos.x, pos.y)) || (btnEnd && !btnEnd.ghost && btnEnd.containsScreenPoint?.(pos.x, pos.y)));
+          if (!hitPopup && !hitConfirmBtn) {
+            if (!frame.animating) global.TurnConfirmPopup.close();
+            return;
+          }
         }
       }
-      const hit = this.hitTestNode(this.root, pos.x, pos.y);
+      const hit = this.hitTestActiveLayer(pos.x, pos.y);
       this.pressedNode = hit;
       if (hit) {
         this.lastClickedNode = hit;
@@ -285,6 +305,7 @@
     }, { passive: true });
 
     this.canvas.addEventListener('wheel', (e) => {
+      if (this.hasForegroundOverlay() || !this.baseLayerVisible || !this.baseLayerInteractive) return;
       if (global.TurnConfirmPopup?.isOpen?.() || global.GameSettingsRenamePopup?.isOpen?.()) return;
       const pos = getPos(e);
       const hit = this.hitTestNode(this.root, pos.x, pos.y);

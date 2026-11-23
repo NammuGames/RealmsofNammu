@@ -223,12 +223,12 @@
         });
       }
 
-      if (snap.stats) {
+      if (snap.stats && !opts.skipStats) {
         const st = snap.stats;
         const net = global.NetworkP2PManager;
-        const povIdx = (net?.isConnected?.() && net.getDefaultPausedPlayerIndex)
-          ? net.getDefaultPausedPlayerIndex()
-          : (g.activePlayerIndex || 0);
+        const povIdx = global.POVManager
+          ? global.POVManager.getPOVIndex()
+          : ((net?.isConnected?.() && net.getDefaultPausedPlayerIndex) ? net.getDefaultPausedPlayerIndex() : (g.activePlayerIndex || 0));
         const povPlayerId = g.players?.[povIdx]?.id || (povIdx + 1);
         global.NativeStatPod?.setStats?.({
           player: String(povPlayerId), turn: st.turn, round: st.round,

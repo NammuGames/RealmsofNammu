@@ -22,6 +22,8 @@
       const renderer = global.BoardRenderer;
       const audio = global.AudioSynth;
       if (!state) return;
+      const eng = global.HexUIEngine;
+      if (eng && (!eng.baseLayerVisible || !eng.baseLayerInteractive || eng.foregroundOverlay?.visible)) return;
       if (document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
       if (global.GameSettingsRenamePopup?.isOpen?.() || global.TurnConfirmPopup?.isOpen?.()) return;
 
@@ -175,6 +177,7 @@
           slot === 0 &&
           !state.placedThisTurn &&
           !global.SpellManager?.isTurnTransitionBusy?.() &&
+          !global.POVManager?.isSpectatingOrMismatched?.() &&
           (!global.NetworkP2PManager?.isConnected?.() || global.NetworkP2PManager.isLocalPlayersTurn())
         ) {
           state.selectedTrayIndex = 0;

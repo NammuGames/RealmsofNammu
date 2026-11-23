@@ -88,7 +88,9 @@
   // ── 2. PREVIEW BUTTON POD (2 ROWS: PURPLE TITLE SUB-POD + BLUE STAT BADGES) ─
   Proto.createPreviewPod = function(item) {
     const HexNode = global.HexNode, traits = global.HexTraits, d = this.dims, cfg = this.subPodConfig || {};
-    const col = '#10f000', isDoubleBorder = !!item.isDoubleBorder;
+    const col = item.color || '#10f000', isDoubleBorder = !!item.isDoubleBorder;
+    const isInteractive = !item.isReadOnly && (typeof item.onClick === 'function');
+    const lockPurple = !!item.isLockedPurple;
     const pod = new HexNode({
       id: `pod-prev-${item.id}`, wBase: d.podW, hBase: d.podH, apex: d.podApex, orientation: 'flat',
       style: {
@@ -97,9 +99,12 @@
         outerHighlight: { enabled: isDoubleBorder, color: col, sharpEdgeColor: col, blur: 8, intensity: 0.80, steps: 3 }
       }
     });
-    pod.isSidebarButton = true;
-    const onActivate = () => { if (typeof item.onClick === 'function') item.onClick(); };
-    pod.addTrait(new traits.ButtonTrait({ onClick: onActivate }));
+    if (isInteractive) {
+      pod.isSidebarButton = true;
+      const onActivate = () => { if (typeof item.onClick === 'function') item.onClick(); };
+      pod.addTrait(new traits.ButtonTrait({ onClick: onActivate }));
+    }
+    if (item.ghost) pod.setGhost(true);
 
     // Row 1: Large Main Title Sub-Pod (Lock/Fortify Purple #953ffd, inert)
     const r1Y = cfg.prevRow1Y ?? -30, tW = cfg.prevTitleW ?? 760, tH = cfg.prevTitleH ?? 50, tApex = cfg.prevTitleApex ?? 16;
@@ -122,11 +127,12 @@
     });
     pod.addChild(titlePod);
 
-    // Row 2: Self-Centering Overlapping Sub-Pod Badges (Phase Blue #3d6eff, inert)
+    // Row 2: Self-Centering Overlapping Sub-Pod Badges (Phase Blue #3d6eff or Purple #953ffd when locked)
     const badges = item.badges || [], count = badges.length;
     const bW = cfg.prevBadgeW ?? 110, bH = cfg.prevBadgeH ?? 36, bApex = cfg.prevBadgeApex ?? 12;
     const bSpacing = cfg.prevBadgeSpacing ?? 54, bSize = cfg.prevBadgeTextSize ?? 24, bTextY = cfg.prevBadgeTextY ?? 2;
     const r2Y = cfg.prevRow2Y ?? 30;
+    const badgeCol = lockPurple ? '#953ffd' : '#3d6eff';
     if (count > 0) {
       const maxRowW = d.podW, bTotalW = bW + 2 * bApex, naturalPitch = bTotalW + bSpacing;
       const pitch = (count > 1 && (count - 1) * naturalPitch + bTotalW > maxRowW) ? (maxRowW - bTotalW) / (count - 1) : naturalPitch;
@@ -138,7 +144,7 @@
         const badge = new HexNode({
           id: `badge-${item.id}-${idx}`, position: { x: startX + idx * pitch, y: r2Y },
           wBase: bW, hBase: bH, apex: bApex, orientation: 'flat', inert: true,
-          style: { bgColor: 'rgba(15, 23, 42, 1.0)', bgOpacity: 1.0, innerHighlight: { enabled: true, color: '#3d6eff', sharpEdgeColor: '#3d6eff', spread: 6, intensity: 0.70, steps: 3 } }
+          style: { bgColor: 'rgba(15, 23, 42, 1.0)', bgOpacity: 1.0, innerHighlight: { enabled: true, color: badgeCol, sharpEdgeColor: badgeCol, spread: 6, intensity: 0.70, steps: 3 } }
         });
         badge.addTrait({
           name: 'badge-text-render',
@@ -160,7 +166,9 @@
     const HexNode = global.HexNode, traits = global.HexTraits, d = this.dims, cfg = this.subPodConfig || {};
     const col = item.color || '#10f000';
     const isRed = (col === '#ff3333');
+    const lockPurple = !!item.isLockedPurple;
     const isDouble = !isRed && !!item.isDoubleBorder;
+    const isInteractive = !item.isReadOnly && (typeof item.onClick === 'function');
     const pod = new HexNode({
       id: `pod-preset-${item.id}`, wBase: d.podW, hBase: d.podH, apex: d.podApex, orientation: 'flat',
       style: {
@@ -169,9 +177,14 @@
         outerHighlight: { enabled: isDouble, color: col, sharpEdgeColor: col, blur: 8, intensity: 0.85, steps: 3 }
       }
     });
-    pod.isSidebarButton = true;
-    const onActivate = () => { if (typeof item.onClick === 'function') item.onClick(); };
-    pod.addTrait(new traits.ButtonTrait({ onClick: onActivate, hoverGlowColor: col }));
+    if (isInteractive) {
+      pod.isSidebarButton = true;
+      const onActivate = () => { if (typeof item.onClick === 'function') item.onClick(); };
+      pod.addTrait(new traits.ButtonTrait({ onClick: onActivate, hoverGlowColor: col }));
+    } else {
+      pod.inert = true;
+    }
+    if (item.ghost) pod.setGhost(true);
 
     const rowY = cfg.presetRowY ?? 0, pH = cfg.presetHeight ?? 62, pApex = cfg.presetApex ?? 18;
     const nameW = cfg.presetNameW ?? 530, tagW = cfg.presetTagW ?? 230, gap = cfg.presetSpacing ?? 48;
@@ -198,10 +211,16 @@
     });
     pod.addChild(leftPod);
 
-    // Right Sub-Pod: Indexed Category Tag (Phase Blue #3d6eff, inert)
+    // Right Sub-Pod: Indexed Category Tag (Phase Blue #3d6eff, Purple #953ffd when locked, or Double Orange when highlighted)
+    const isRightOrange = !!item.isRightSubDoubleOrange;
+    const rightCol = isRightOrange ? '#ff9214' : (isRed ? '#ff3333' : (lockPurple ? '#953ffd' : '#3d6eff'));
     const rightPod = new HexNode({
       id: `sub-idx-${item.id}`, position: { x: rightX, y: rowY }, wBase: tagW, hBase: pH, apex: pApex, orientation: 'flat', inert: true,
-      style: { bgColor: 'rgba(15, 23, 42, 1.0)', bgOpacity: 1.0, innerHighlight: { enabled: true, color: isRed ? '#ff3333' : '#3d6eff', sharpEdgeColor: isRed ? '#ff3333' : '#3d6eff', spread: 6, intensity: 0.75, steps: 3 } }
+      style: {
+        bgColor: isRightOrange ? 'rgba(28, 18, 8, 0.95)' : 'rgba(15, 23, 42, 1.0)', bgOpacity: 1.0,
+        innerHighlight: { enabled: true, color: rightCol, sharpEdgeColor: rightCol, spread: isRightOrange ? 8 : 6, intensity: isRightOrange ? 0.80 : 0.75, steps: 3 },
+        outerHighlight: isRightOrange ? { enabled: true, color: '#ff9214', sharpEdgeColor: '#ff9214', blur: 8, intensity: 0.80, steps: 3 } : { enabled: false }
+      }
     });
     rightPod.addTrait({
       name: 'sub-idx-render',
@@ -220,7 +239,8 @@
   // ── 4. FULL STEPPER POD (PURPLE CENTER READOUT + 4 BLUE FLANKING BUTTONS) ─
   Proto.createFullStepperPod = function(item, isDoubleLine = false, isHalf = false) {
     const HexNode = global.HexNode, traits = global.HexTraits, d = this.dims, cfg = this.subPodConfig || {};
-    const col = item.color || '#10f000';
+    const ro = !!item.isReadOnly;
+    const col = ro ? '#953ffd' : (item.color || '#10f000');
     const pod = new HexNode({
       id: `pod-step-${item.id}`, wBase: d.podW, hBase: d.podH, apex: d.podApex, orientation: 'flat',
       style: { bgColor: 'rgba(7, 12, 24, 0.93)', bgOpacity: 1.0, innerHighlight: { enabled: true, color: col, sharpEdgeColor: col, spread: 8, intensity: 0.80, steps: 3 } }
@@ -229,9 +249,14 @@
     // Center Sub-Pod: Parameter Value Display
     const cW = cfg.stepCenterW ?? (isDoubleLine ? 340 : 300), cH = isDoubleLine ? (cfg.stepDoubleH ?? 88) : (cfg.stepCenterH ?? 72);
     const cApex = cfg.stepCenterApex ?? 21, cY = cfg.stepCenterRowY ?? 0, cTextY = cfg.stepCenterTextY ?? 2;
-    const isCenterClickable = typeof item.onCenterClick === 'function', isLocked = !!item.isLocked;
+    const isCenterClickable = !ro && typeof item.onCenterClick === 'function', isLocked = !!item.isLocked;
     let centerCol = '#953ffd', centerSpread = 6, centerIntensity = 0.70, isDoubleOuter = false;
-    if (isLocked) {
+    if (ro) {
+      centerCol = '#953ffd';
+      centerSpread = 6;
+      centerIntensity = 0.75;
+      isDoubleOuter = isLocked;
+    } else if (isLocked) {
       centerCol = '#ff9214';
       centerSpread = 8;
       centerIntensity = 0.85;
@@ -289,13 +314,19 @@
       ? [{ label: '−1', d: -1, x: -innerX }, { label: '+1', d: 1, x: innerX }]
       : [{ label: '−12', d: -12, x: -outerX }, { label: '−1', d: -1, x: -innerX }, { label: '+1', d: 1, x: innerX }, { label: '+12', d: 12, x: outerX }];
 
+    const stepBtnCol = ro ? '#953ffd' : '#3d6eff';
     steps.forEach(st => {
       const btn = new HexNode({
         id: `step-${item.id}-${st.d}`, position: { x: st.x, y: btnY }, wBase: btnW, hBase: btnH, apex: btnApex, orientation: 'flat',
-        style: { bgColor: 'rgba(15, 23, 42, 1.0)', bgOpacity: 1.0, innerHighlight: { enabled: true, color: '#3d6eff', sharpEdgeColor: '#3d6eff', spread: 6, intensity: 0.70, steps: 3 } }
+        style: { bgColor: 'rgba(15, 23, 42, 1.0)', bgOpacity: 1.0, innerHighlight: { enabled: true, color: stepBtnCol, sharpEdgeColor: stepBtnCol, spread: 6, intensity: 0.70, steps: 3 } }
       });
-      btn.isSidebarButton = true;
-      btn.addTrait(new traits.ButtonTrait({ onClick: () => { item.onDelta(st.d); } }));
+      if (!ro) {
+        btn.isSidebarButton = true;
+        btn.addTrait(new traits.ButtonTrait({ onClick: () => { item.onDelta(st.d); } }));
+      } else {
+        btn.setGhost(true);
+        btn.inert = true;
+      }
       btn.addTrait({
         name: 'step-btn-render',
         render(ctx) {

@@ -10,7 +10,7 @@
   const GameSettingsRenamePopupClass = global.GameSettingsRenamePopupClass;
   if (!GameSettingsRenamePopupClass) return;
 
-  const { WIDE_CHARS, getWeightedLength, DEFAULT_POPUP_CONFIG } = GameSettingsRenamePopupClass._text;
+  const { WIDE_CHARS, MAX_NAME_WEIGHT, getWeightedLength, DEFAULT_POPUP_CONFIG } = GameSettingsRenamePopupClass._text;
   const proto = GameSettingsRenamePopupClass.prototype;
 
   proto.applyCascadeAndConfirm = function(targetNum) {
@@ -63,6 +63,14 @@
       return;
     }
     if (this.mode === 'singleText') {
+      const trimmed = (this.targetItem?.name || '').trim();
+      if (this._requireNonEmpty && !trimmed) {
+        if (global.AudioSynth?.playDetonateChime) global.AudioSynth.playDetonateChime(1);
+        global.GameState?.showToast?.('⚠️ Please enter a match name!');
+        this._focusMobileInput?.();
+        return;
+      }
+      this.targetItem.name = trimmed || (this._requireNonEmpty ? '' : (this._singlePlaceholder || 'Match 001'));
       this.close(true);
       return;
     }
@@ -155,16 +163,23 @@
       }
 
       if (this.activeField === 'name') {
+        const maxW = (this.mode === 'singleText' && this._singleMaxWeight) ? this._singleMaxWeight : (MAX_NAME_WEIGHT || 30.001);
         if (e.key === 'Backspace') {
           e.preventDefault();
           this.targetItem.name = (this.targetItem.name || '').slice(0, -1);
+          if (this._mobileInput && (this.mode === 'singleText' || this._isMobileInputDevice?.())) {
+            this._mobileInput.value = this.targetItem.name;
+          }
           if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
           this.triggerRender();
         } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
           e.preventDefault();
           const addW = WIDE_CHARS.has(e.key) ? 1.6 : 1;
-          if (getWeightedLength(this.targetItem.name) + addW <= 30.001) {
+          if (getWeightedLength(this.targetItem.name) + addW <= maxW) {
             this.targetItem.name = (this.targetItem.name || '') + e.key;
+            if (this._mobileInput && (this.mode === 'singleText' || this._isMobileInputDevice?.())) {
+              this._mobileInput.value = this.targetItem.name;
+            }
             if (global.AudioSynth?.playClick) global.AudioSynth.playClick();
             this.triggerRender();
           }

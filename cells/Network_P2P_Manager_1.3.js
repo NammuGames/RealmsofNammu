@@ -21,7 +21,7 @@
     const self = this;
 
     const guardTurn = (fn) => function(...args) {
-      if (!self._applyingRemote && self.isConnected() && !self.isLocalPlayersTurn()) {
+      if (!self._applyingRemote && (global.POVManager?.isSpectatingOrMismatched?.() || (self.isConnected() && !self.isLocalPlayersTurn()))) {
         global.AudioSynth?.playCancel?.();
         global.GameState?.showToast?.('👀 Spectating — board locked until your turn');
         return false;
@@ -114,25 +114,42 @@
   /** Broadcasts pre-determined Turn 0/1 match setup so all peers animate menu shrink + spawns together. */
   proto.broadcastMatchStartInit = function(initData = {}) {
     if (this.role !== 'host' || this._applyingRemote || !this.isConnected()) return;
+    this.matchStarted = true;
+    this.roomLocked = true;
     const mc = global.MemoryCardManager;
     const matchId = mc?.activeMatchId || `match_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     if (mc) mc.activeMatchId = matchId;
     const syncId = `${this.myPeerId}:${++this._syncSeq}`;
     const payload = {
       type: 'MATCH_START_INIT', sender: this.myPeerId, syncId, matchId, roomCode: this.roomCode,
-      seatOwners: this.seatOwners?.length ? this.seatOwners : undefined, ...initData
+      matchName: this.matchName || global.GameState?.matchName || '',
+      hostPeerId: this.hostPeerId || this.myPeerId,
+      seatOwners: this.seatOwners?.length ? this.seatOwners.slice() : undefined,
+      roomSeats: this.roomSeats?.length ? this.roomSeats : undefined,
+      peers: Array.from(this.peerMeta.entries()),
+      ...initData
     };
     this._publishRoom?.(payload, '*');
   };
 
   proto._applyRemoteMatchStartInit = async function(msg) {
+    this.matchStarted = true;
+    this.roomLocked = true;
+    this._awaitingEnterMatch = false;
+    this.pendingMatchStartSnap = null;
+    if (msg.hostPeerId) this.hostPeerId = msg.hostPeerId;
+    if (typeof msg.matchName === 'string' && msg.matchName) this.matchName = msg.matchName;
     if (Array.isArray(msg.seatOwners) && msg.seatOwners.length > 0) this.seatOwners = msg.seatOwners.slice();
+    if (Array.isArray(msg.roomSeats) && msg.roomSeats.length > 0) this.roomSeats = msg.roomSeats;
+    if (Array.isArray(msg.peers)) this.peerMeta = new Map(msg.peers);
     if (global.HubGameLoader?.activeGameId !== 'puzzle') await global.HubGameLoader?.launchGame?.('puzzle');
     if (global.MemoryCardManager && msg.matchId) global.MemoryCardManager.activeMatchId = msg.matchId;
     this._applyingRemote = true;
     try {
       const startAnimated = () => {
+        if (global.GameState && this.matchName) global.GameState.matchName = this.matchName;
         global.MatchOrchestrator?.initMatch?.(global.GameState, msg.config, { preRolled: msg, fromRemote: true });
+        global.MemoryCardManager?.saveActivePuzzleMatch?.(msg.matchId);
         this._updateDrawerUI();
       };
       if (global.RoomStatCanvas?.isOpen?.()) {

@@ -43,12 +43,27 @@
       this.role = 'host';
       this.roomCode = code;
       this.hostPeerId = this.myPeerId;
+      this.hostOnline = true;
+      this.roomLocked = !!opts.roomLocked;
+      this.matchStarted = !!opts.matchStarted;
+      this.joinRejectedReason = '';
       this.searchStatus = '';
-      this.matchName = opts.matchName || this.matchName || `Match ${code}`;
+      this.matchName = opts.matchName !== undefined ? (opts.matchName || '') : (this.matchName || '');
       const prof = global.MemoryCardManager?.getProfile?.() || { name: 'Host' };
-      this.peerMeta.clear();
-      this.peerMeta.set(this.myPeerId, { name: prof.name || 'Host', seatIndex: 0, localPlayerCount: localCount });
-      this._rebuildSeatRoster();
+      this.onlinePeerIds = new Set([this.myPeerId]);
+      if (Array.isArray(opts.seatOwners) && opts.seatOwners.length > 0) {
+        this.hydrateSavedRoster?.({
+          hostPeerId: this.myPeerId,
+          seatOwners: opts.seatOwners,
+          roomSeats: opts.roomSeats,
+          peers: opts.peers,
+          matchStarted: this.matchStarted
+        });
+      } else {
+        this.peerMeta.clear();
+        this.peerMeta.set(this.myPeerId, { name: prof.name || 'Host', seatIndex: 0, localPlayerCount: localCount });
+        this._rebuildSeatRoster();
+      }
       this._startHeartbeat();
       this._broadcastRoster();
       this._updateDrawerUI?.();
@@ -76,18 +91,33 @@
     if (global.HubGameLoader?.activeGameId !== 'puzzle') {
       await global.HubGameLoader?.launchGame?.('puzzle');
     }
-    await this.hostRoom(target.roomCode || null, { matchName: target.matchName });
+    const roster = target.rosterMeta || {};
+    await this.hostRoom(target.roomCode || null, {
+      matchName: target.matchName || target.name || '',
+      matchStarted: true,
+      roomLocked: true,
+      seatOwners: roster.seatOwners || target.seatOwners,
+      roomSeats: roster.roomSeats || target.roomSeats,
+      peers: roster.peers || target.peers
+    });
     mc.restorePuzzleState(target);
-    this._assignDefaultSeats(target.playerCount || global.GameState?.playerCount || 1);
-    global.GameState?.showToast?.(`🌐 Hosting "${target.matchName || this.roomCode}" (Code ${this.roomCode})`);
+    if (!Array.isArray(this.seatOwners) || this.seatOwners.length === 0) {
+      this._assignDefaultSeats(target.playerCount || global.GameState?.playerCount || 1);
+      this._syncLockedRoomSeats?.();
+    }
+    this._broadcastRoster();
+    global.GameState?.showToast?.(`🌐 Hosting "${target.matchName || target.name || this.roomCode}" (Code ${this.roomCode})`);
     return true;
   };
 
   proto._onGuestConnectedToHost = function(hostPeerId) {
     if (this.role !== 'guest' || !hostPeerId) return;
-    const firstJoin = !this.connections.has(hostPeerId);
+    const firstJoin = !this.hostOnline || !this.connections.has(hostPeerId);
     this.hostPeerId = hostPeerId;
+    this.hostOnline = true;
     this.connections.set(hostPeerId, { peer: hostPeerId, open: true, lastSeen: Date.now() });
+    this.onlinePeerIds.add(hostPeerId);
+    this.onlinePeerIds.add(this.myPeerId);
     if (firstJoin) {
       if (this._searchRetryTimer) { clearTimeout(this._searchRetryTimer); this._searchRetryTimer = null; }
       this.searchingCode = '';
@@ -197,9 +227,16 @@
     this.role = 'offline';
     this.roomCode = '';
     this.hostPeerId = null;
+    this.hostOnline = false;
+    this.roomLocked = false;
+    this.matchStarted = false;
+    this.joinRejectedReason = '';
+    this.pendingMatchStartSnap = null;
+    this._awaitingEnterMatch = false;
     this.seatOwners = [];
     this.roomSeats = [];
     this.peerMeta.clear();
+    this.onlinePeerIds.clear();
     this.pendingHostOfferToPeerId = null;
     this.pendingHostOfferForMe = false;
     this._updateDrawerUI?.();
@@ -231,12 +268,16 @@
 
   proto._notifyLobbyUpdate = function() {
     global.RoomStatCanvas?.refreshIfOpen?.();
+    global.StatCanvas?.refreshIfOpen?.();
     const gsc = global.GameSettingsCanvas;
     if (gsc?.active) gsc.rebuildTopFrame?.();
   };
 
   proto._rebuildSeatRoster = function() {
     if (this.role !== 'host') return this.getRoomSeats();
+    if (this._isMatchActive() && Array.isArray(this.seatOwners) && this.seatOwners.length > 0) {
+      return this._syncLockedRoomSeats?.() || this.roomSeats;
+    }
     const seats = [];
     const owners = [];
     const hostCount = Math.max(1, Math.min(6, this.hostLocalPlayerCount || this.localPlayerCount || 1));
@@ -268,8 +309,8 @@
 
   proto.getRoomSeats = function() {
     if (this.role === 'host') return this._rebuildSeatRoster();
-    if (this.role === 'guest' && this.isConnected() && Array.isArray(this.roomSeats) && this.roomSeats.length > 0) {
-      return this.roomSeats;
+    if (this.role === 'guest' && Array.isArray(this.roomSeats) && this.roomSeats.length > 0) {
+      if (this.isConnected() || this._isMatchActive()) return this.roomSeats;
     }
     const cnt = Math.max(1, Math.min(6, this.localPlayerCount || global.GameSettingsCanvas?.config?.playerCount || 1));
     const out = [];
@@ -297,15 +338,21 @@
     const gsc = global.GameSettingsCanvas;
     const wp = gsc?.getActiveWorkingPreset?.();
     const seats = this.getRoomSeats() || [];
-    const playerCount = global.GameState?.matchStarted ? (global.GameState.playerCount || 1) : Math.max(1, seats.length);
+    const matchActive = this._isMatchActive();
+    const playerCount = matchActive ? (global.GameState?.playerCount || Math.max(1, seats.length)) : Math.max(1, seats.length);
     return {
       type: 'ROOM_ROSTER',
       roomCode: this.roomCode,
       matchName: this.matchName || global.GameState?.matchName || '',
       presetName: wp?.name || global.GameState?.matchConfig?.presetName || 'Meditate',
       playerCount,
-      matchConfig: wp?.match ? { ...wp.match, presetName: wp.name } : null,
+      matchConfig: wp?.match
+        ? { ...wp.match, presetName: wp.name, luckPreset: wp.luck || null, blightPreset: wp.blight || null }
+        : (global.GameState?.matchConfig || null),
       hostPeerId: this.hostPeerId,
+      roomLocked: !!this.roomLocked,
+      matchStarted: matchActive,
+      onlinePeerIds: this.getOnlinePeerIds?.() || [this.myPeerId],
       seatOwners: this.seatOwners,
       seats,
       peers: Array.from(this.peerMeta.entries())
@@ -357,6 +404,7 @@
       type: 'HOST_HANDOFF',
       newHostPeerId: nextHostId,
       seatOwners: this.seatOwners,
+      onlinePeerIds: this.getOnlinePeerIds?.() || [],
       peers: Array.from(this.peerMeta.entries()),
       snap
     };
@@ -368,19 +416,23 @@
   proto._acceptHostHandoff = function(msg) {
     const nextHost = msg.newHostPeerId;
     this.hostPeerId = nextHost;
+    this.hostOnline = true;
     this.pendingHostOfferToPeerId = null;
     this.pendingHostOfferForMe = false;
     if (Array.isArray(msg.seatOwners)) this.seatOwners = msg.seatOwners.slice();
     if (Array.isArray(msg.peers)) this.peerMeta = new Map(msg.peers);
+    if (Array.isArray(msg.onlinePeerIds)) this.onlinePeerIds = new Set(msg.onlinePeerIds);
 
     if (this.myPeerId === nextHost) {
       this.role = 'host';
       if (global.GameState) global.GameState.roleBadge = 'Host';
+      const onlineSet = Array.isArray(msg.onlinePeerIds) ? new Set(msg.onlinePeerIds) : null;
       this.peerMeta.forEach((_, pid) => {
-        if (pid !== this.myPeerId && !this.connections.has(pid)) {
+        if (pid !== this.myPeerId && !this.connections.has(pid) && (!onlineSet || onlineSet.has(pid))) {
           this.connections.set(pid, { peer: pid, open: true, lastSeen: Date.now() });
         }
       });
+      this.onlinePeerIds.add(this.myPeerId);
       this._rebuildSeatRoster();
       this._broadcastRoster();
       if (msg.snap && global.MemoryCardManager) global.MemoryCardManager.saveActivePuzzleMatch();
@@ -388,7 +440,11 @@
     } else {
       this.role = 'guest';
       if (global.GameState) global.GameState.roleBadge = 'Player';
-      if (nextHost) this.connections.set(nextHost, { peer: nextHost, open: true, lastSeen: Date.now() });
+      if (nextHost) {
+        this.connections.set(nextHost, { peer: nextHost, open: true, lastSeen: Date.now() });
+        this.onlinePeerIds.add(nextHost);
+      }
+      this._syncLockedRoomSeats?.();
       global.GameState?.showToast?.('🔄 Host transferred smoothly');
     }
     this._updateDrawerUI?.();

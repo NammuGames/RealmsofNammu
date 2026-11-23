@@ -15,11 +15,13 @@
     : (global.GameSettingsCanvas ? Object.getPrototypeOf(global.GameSettingsCanvas) : null);
   if (!Proto) return;
 
-  // Reset match-delete mode cleanly whenever columns pop or menu closes
+  // Reset match-delete & match-copy modes cleanly whenever columns pop or menu closes
   const origPop = Proto.popColumn;
   if (typeof origPop === 'function') {
     Proto.popColumn = function(options = {}) {
       this._isMatchDeleteMode = false;
+      this._isMatchCopyMode = false;
+      this.syncArmedDraftSettings?.();
       return origPop.call(this, options);
     };
   }
@@ -27,6 +29,7 @@
   if (typeof origClose === 'function') {
     Proto.close = function(onDone) {
       this._isMatchDeleteMode = false;
+      this._isMatchCopyMode = false;
       return origClose.call(this, onDone);
     };
   }
@@ -54,8 +57,9 @@
         id: 'mc-status-badge',
         title: 'Memory Card',
         categoryIndexText: isSaved ? 'Saved' : 'Unsaved',
-        color: isSaved ? '#10f000' : '#ff8800',
-        isDoubleBorder: !isSaved,
+        color: isSaved ? '#10f000' : '#953ffd',
+        isDoubleBorder: false,
+        isRightSubDoubleOrange: !isSaved,
         onClick: () => {}
       },
       {
@@ -88,7 +92,7 @@
     ]);
   };
 
-  // ── 2. SAVED MATCHES COLUMN (NEW MATCH TOP + AUTO-SAVES + QUIT MATCH) ─────
+  // ── 2. MATCHES COLUMN (NEW MATCH TOP + DRAFT/LOCAL/HOST/GUEST + COPY + QUIT) ──
   Proto.renderSavedMatchesColumn = function() {
     const self = this;
     const mc = global.MemoryCardManager;
@@ -96,40 +100,49 @@
     const pendingDel = self._pendingDeleteIds || (self._pendingDeleteIds = new Set());
     const visibleSaves = saves.filter(s => !pendingDel.has(s.id));
     const isDelete = !!this._isMatchDeleteMode;
-    const armedId = this.selectedSavedMatchId || null;
+    const isCopy = !!this._isMatchCopyMode && !isDelete;
+    const armedDraftId = this.armedDraftId || null;
+    const armedSaveId = this.selectedSavedMatchId || null;
 
     const items = [];
 
-    // Fixed unchangeable top slot: "New Match" | "Matches"
+    // Top creator slot: "New Match" | "Create" (always green unless ghosted during Copy or Quit mode)
     items.push({
       type: 'preset_name',
       id: 'match-slot-new',
       title: 'New Match',
-      categoryIndexText: 'Matches',
-      color: (!armedId && !isDelete) ? '#ff8800' : '#10f000',
-      isDoubleBorder: !armedId && !isDelete,
+      categoryIndexText: 'Create',
+      color: (isDelete || isCopy) ? '#64748b' : '#10f000',
+      isDoubleBorder: false,
+      isReadOnly: isDelete || isCopy,
       onClick: () => {
         if (isDelete) {
           global.GameState?.showToast?.('⚠️ "New Match" slot cannot be removed.');
           return;
         }
-        self.selectedSavedMatchId = null;
-        if (self.history?.length > 1) self.popColumn();
-        else self.buildScene();
+        if (isCopy) {
+          global.GameState?.showToast?.('⚠️ Select an existing match card to copy into a new Draft.');
+          return;
+        }
+        self.promptCreateNewDraft?.('pod-preset-match-slot-new');
       }
     });
 
-    // Auto-saved in-progress / paused matches (excluding temporarily hidden staged deletions)
+    // Persisted Draft / Local / Host / Guest match cards
     visibleSaves.forEach((save, idx) => {
-      const isSelected = armedId === save.id;
-      const roleLabel = save.roleBadge === 'Host' ? 'Host' : 'Player';
-      const titleText = save.matchName || `Match ${save.roomCode || idx + 1}`;
+      const type = save.matchType || (save.isDraft ? 'Draft' : (save.lobbyMode === 'Online' ? (save.roleBadge === 'Host' ? 'Host' : 'Guest') : 'Local'));
+      const isArmed = (type === 'Draft') ? (armedDraftId === save.id) : (armedSaveId === save.id);
+      const tagLabel = mc?.getMatchTagLabel ? mc.getMatchTagLabel(save) : `${type} ${save.tagNumber || '001'}`;
+      const titleText = save.matchName || save.name || `Match ${save.roomCode || idx + 1}`;
+      const podOriginId = `pod-preset-match-slot-save-${idx}`;
 
       let itemColor = '#3d6eff';
       let isDouble = false;
       if (isDelete) {
         itemColor = '#ff3333';
-      } else if (isSelected) {
+      } else if (isCopy) {
+        itemColor = '#fff700';
+      } else if (isArmed) {
         itemColor = '#ff8800';
         isDouble = true;
       }
@@ -138,35 +151,78 @@
         type: 'preset_name',
         id: `match-slot-save-${idx}`,
         title: titleText,
-        categoryIndexText: roleLabel,
+        categoryIndexText: tagLabel,
         color: itemColor,
         isDoubleBorder: isDouble,
         onClick: () => {
           if (isDelete) {
             pendingDel.add(save.id);
             self._pendingDeleteCommit = (ids) => {
+              const prevDraftId = self.armedDraftId || null;
+              const prevSaveId = self.selectedSavedMatchId || null;
+              const deletedCodes = new Set();
+              let deletedArmed = false;
               let count = 0;
+
               ids.forEach(id => {
+                const entry = mc?.getSaveById?.(id);
+                if (entry?.roomCode) deletedCodes.add(String(entry.roomCode).toUpperCase());
+                if (id === prevDraftId || id === prevSaveId) deletedArmed = true;
                 mc?.deleteSavedMatch?.(id);
-                if (self.selectedSavedMatchId === id) self.selectedSavedMatchId = null;
                 count++;
               });
-              if (count > 0) global.GameState?.showToast?.(`🗑 Removed ${count} Saved Match${count > 1 ? 'es' : ''}`);
+
+              const noSavesLeft = !(mc?.listSaves?.()?.length);
+              if (deletedArmed || noSavesLeft) {
+                self.selectedSavedMatchId = null;
+                self.clearArmedDraft?.();
+                if (self.config) {
+                  self.config.pendingMatchName = null;
+                  self.config.pendingRoomCode = null;
+                  self.config.lobbyMode = 'Local';
+                }
+              }
+
+              const net = global.NetworkP2PManager;
+              const liveCode = String(net?.roomCode || '').toUpperCase();
+              if (net && net.role !== 'offline' && (deletedCodes.has(liveCode) || deletedArmed || noSavesLeft)) {
+                net.matchName = '';
+                if (net.role === 'host') net.closeRoomAndSave?.();
+                else net.leaveRoom?.();
+              }
+
+              if (count > 0) global.GameState?.showToast?.(`🗑 Removed ${count} Match${count > 1 ? 'es' : ''}`);
             };
             global.GameState?.showToast?.(`⏳ Staged "${titleText}" for removal — press Confirm to finalize or Return to cancel`);
             if (visibleSaves.length <= 1) self._isMatchDeleteMode = false;
             self.rebuildTopFrame();
             return;
           }
-          self.selectedSavedMatchId = save.id;
-          global.GameState?.showToast?.(`✦ Armed Saved Match "${titleText}"`);
-          if (self.history?.length > 1) self.popColumn();
-          else self.buildScene();
+          if (isCopy) {
+            self.promptCopyMatchToDraft?.(save, podOriginId);
+            return;
+          }
+          self.handleMatchCardSelect?.(save, podOriginId);
         }
       });
     });
 
-    // Bottom Delete-mode equivalent: "Quit Match" (no Add New button)
+    // Bottom Yellow "Copy" button (mutually exclusive with Quit Match)
+    if (visibleSaves.length > 0 || isCopy) {
+      items.push({
+        type: 'base',
+        id: 'match-copy-toggle',
+        title: isCopy ? '✖ Cancel Copy' : 'Copy',
+        color: '#fff700',
+        onClick: () => {
+          self._isMatchDeleteMode = false;
+          self._isMatchCopyMode = !self._isMatchCopyMode;
+          self.buildScene();
+        }
+      });
+    }
+
+    // Bottom Red "Quit Match" button (mutually exclusive with Copy)
     if (visibleSaves.length > 0 || isDelete) {
       items.push({
         type: 'base',
@@ -174,12 +230,13 @@
         title: isDelete ? '✖ Cancel Quit Match' : 'Quit Match',
         color: '#ff3333',
         onClick: () => {
+          self._isMatchCopyMode = false;
           self._isMatchDeleteMode = !self._isMatchDeleteMode;
           self.buildScene();
         }
       });
     }
 
-    this.renderColumn('Saved Matches', true, items);
+    this.renderColumn('Matches', true, items);
   };
 })(typeof window !== 'undefined' ? window : this);

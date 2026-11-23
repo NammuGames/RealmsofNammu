@@ -208,10 +208,14 @@
     }
 
     _getSpectatorContext() {
-      const g = global.GameState, net = global.NetworkP2PManager;
-      const isSpectating = !!(net?.isConnected?.() && !net.isLocalPlayersTurn());
+      const g = global.GameState, net = global.NetworkP2PManager, pm = global.POVManager;
+      const isSpectating = pm
+        ? pm.isSpectatingOrMismatched()
+        : !!(net?.isConnected?.() && !net.isLocalPlayersTurn());
       if (!isSpectating) return { isSpectating: false, povPlayer: null };
-      const povIdx = net.getDefaultPausedPlayerIndex ? net.getDefaultPausedPlayerIndex() : (g?.activePlayerIndex || 0);
+      const povIdx = pm
+        ? pm.getPOVIndex()
+        : (net?.getDefaultPausedPlayerIndex ? net.getDefaultPausedPlayerIndex() : (g?.activePlayerIndex || 0));
       return { isSpectating: true, povPlayer: g?.players?.[povIdx] || null };
     }
 

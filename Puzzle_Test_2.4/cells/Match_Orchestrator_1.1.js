@@ -69,6 +69,7 @@
     global.UndoManager?.clearTurnHistory?.();
     global.TurnLogManager?.reset?.(global.MemoryCardManager?.activeMatchId || null);
     global.TurnLogPlayer?.reset?.();
+    global.POVManager?.reset?.();
     if (global.BoardRenderer) {
       global.BoardRenderer.currentBoardRadius = targetRadius;
       global.BoardRenderer.resetCamera?.();
@@ -153,6 +154,7 @@
             state.selectedRotation = 0;
             state.upDownAxisState = 0;
             state.placementCursor = { q: 0, r: 0 };
+            global.POVManager?.onTurnStarted?.(state.activePlayerIndex || 0);
 
             const activeMat = isLocalTurn && state.getActiveMaterial ? state.getActiveMaterial() : null;
             const h3Sec = global.H_TIMING?.THREE_BEATS_SEC ?? (3 * Math.pow(12, 8) / 1420405751.768);

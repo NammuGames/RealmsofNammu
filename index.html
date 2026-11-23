@@ -9,6 +9,20 @@
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600;700&amp;family=Inter:wght@300;400;500;600;700&amp;family=Orbitron:wght@500;700;900&amp;family=Outfit:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="Puzzle_Test_2.4/style.css">
   <style>
+    @font-face {
+      font-family: 'Sci-Fae';
+      src: url('Puzzle_Test_2.4/SciFae_Pseudo_Script_1.0.otf') format('opentype');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'SciFaePseudoScript10';
+      src: url('Puzzle_Test_2.4/SciFae_Pseudo_Script_1.0.otf') format('opentype');
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: swap;
+    }
     body:not(.dev-drawers-enabled) #btn-toggle-metrics,
     body:not(.dev-drawers-enabled) #btn-toggle-tuning,
     body:not(.dev-drawers-enabled) #metrics-drawer,
@@ -174,6 +188,27 @@
             📂 Load Card
           </button>
         </div>
+
+        <div class="group-title" style="margin-top: 16px;">🌌 Hub Preview Canvas</div>
+        <div class="slider-row" style="margin-top: 6px;">
+          <div class="slider-header"><span class="slider-label">Title Bars Width</span><span id="val-hub-title-w" class="slider-val">960 px</span></div>
+          <input type="range" id="slider-hub-title-w" min="220" max="1160" step="2" value="960">
+        </div>
+        <div class="slider-row" style="margin-top: 6px;">
+          <div class="slider-header"><span class="slider-label">Title Bars ±Y Offset</span><span id="val-hub-title-y" class="slider-val">270 px</span></div>
+          <input type="range" id="slider-hub-title-y" min="200" max="345" step="1" value="270">
+        </div>
+        <div style="margin-top: 8px;">
+          <label for="input-hub-upper-title" style="display:block; font-size:11px; color:#94a3b8; margin-bottom:4px;">Upper Title Bar Text</label>
+          <input type="text" id="input-hub-upper-title" value="Puzzle Beta" spellcheck="false" style="width:100%; padding:6px 8px; border-radius:6px; border:1px solid rgba(56,189,248,0.35); background:rgba(15,23,42,0.85); color:#f8fafc; font-size:12px;">
+        </div>
+        <div style="margin-top: 8px;">
+          <label for="input-hub-instruct-text" style="display:block; font-size:11px; color:#94a3b8; margin-bottom:4px;">Instructions Frame Text</label>
+          <textarea id="input-hub-instruct-text" rows="4" spellcheck="false" style="width:100%; padding:6px 8px; border-radius:6px; border:1px solid rgba(56,189,248,0.35); background:rgba(15,23,42,0.85); color:#f8fafc; font-size:12px; resize:vertical;">Arrange Magic Components to create Elemental Spells, and hold back the spreading Blight across solo or online arenas.</textarea>
+        </div>
+        <button id="btn-copy-hub-preview-config" class="btn-action-primary" style="margin-top: 10px; width: 100%; justify-content: center;" title="Copy Hub Preview Canvas Configuration as JSON to Clipboard">
+          📋 Copy Hub Preview Config (JSON)
+        </button>
       </div>
     </div>
 
@@ -377,6 +412,7 @@
   <script src="cells/Network_P2P_Manager_1.1.js"></script>
   <script src="cells/Network_P2P_Manager_1.2.js"></script>
   <script src="cells/Network_P2P_Manager_1.3.js"></script>
+  <script src="cells/Network_P2P_Manager_1.4.js"></script>
 
   <!-- ====================================================================== -->
   <!-- NAMMU GAMES HUB BOOTLOADER                                             -->
@@ -447,11 +483,16 @@
         atlas.bakeButtonStamps(state.btnW1, state.btnHeight, Math.max(0, (state.btnW2 - state.btnW1) * 0.5));
       }
 
+      window.ACTIVE_FONT_FAMILY = '"Sci-Fae", "SciFaePseudoScript10", "Orbitron", sans-serif';
+      if (document.fonts?.load) {
+        document.fonts.load('400 32px "Sci-Fae"').catch(() => {});
+        document.fonts.load('700 32px "Sci-Fae"').catch(() => {});
+      }
+
       warp.init(dom.canvasWarp);
       engine.init(dom.canvasBoard);
-      if (engine.boardFrame) engine.boardFrame.visible = false;
-      if (engine.leftSidebar) engine.leftSidebar.visible = false;
-      if (engine.rightSidebar) engine.rightSidebar.visible = false;
+      engine.baseLayerVisible = false;
+      engine.baseLayerInteractive = false;
 
       if (cameraCtrl) cameraCtrl.init(state, dom, engine, window.AudioSynth);
       if (window.ResponsiveViewportAdapter) window.ResponsiveViewportAdapter.init({ state, dom, engine });

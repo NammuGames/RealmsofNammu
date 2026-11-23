@@ -36,40 +36,48 @@
     const self = this;
     const list = this.config.presets || [];
     const activeIdx = Math.max(0, Math.min(list.length - 1, this.config.activePresetIndex || 0));
-    const curPreset = list[activeIdx] || list[0] || { name: 'Meditate' };
+    const curPreset = this.getActiveWorkingPreset ? (this.getActiveWorkingPreset() || list[activeIdx] || list[0] || { name: 'Meditate' }) : (list[activeIdx] || list[0] || { name: 'Meditate' });
+    const armedDraft = this.getArmedDraft ? this.getArmedDraft() : null;
     const armedSave = this.getArmedSavedMatch ? this.getArmedSavedMatch() : null;
+    const isStartedSave = !!(armedSave && armedSave.matchType !== 'Draft');
     const mc = global.MemoryCardManager;
     const net = global.NetworkP2PManager;
-    const isGuestWaiting = !!(net?.role === 'guest' && net?.isConnected?.());
+    const isGuestWaiting = !isStartedSave && !!(net?.role === 'guest' && net?.isConnected?.());
+    const guestCanEnter = !(isStartedSave && armedSave?.matchType === 'Guest' && net && !net.isHostOnline?.());
 
-    const levelTitle = armedSave
+    const levelTitle = isStartedSave
       ? (armedSave.presetName || armedSave.matchConfig?.presetName || curPreset.name)
-      : (isGuestWaiting ? (net.hostPresetName || curPreset.name) : curPreset.name);
-    const isOnline = !!(net?.isConnected?.() || (armedSave && armedSave.lobbyMode === 'Online'));
-    const pCountLocal = armedSave ? (armedSave.playerCount || 1) : (this.config.playerCount || 1);
-    const playersLeft = armedSave
-      ? (isOnline && armedSave.roomCode ? `Room ${armedSave.roomCode}` : `${pCountLocal} Player${pCountLocal > 1 ? 's' : ''}`)
-      : (isOnline && net?.roomCode ? `Room ${net.roomCode}` : `${pCountLocal} Player${pCountLocal > 1 ? 's' : ''}`);
-    const playersRight = isOnline ? 'Online' : 'Local';
-    const matchTitle = armedSave ? (armedSave.matchName || 'Saved Match') : 'New Match';
+      : (isGuestWaiting ? (net.hostPresetName || curPreset.name) : (armedDraft ? (this.armedDraftPreset?.name || armedDraft.presetName || curPreset.name) : curPreset.name));
+    const isOnline = !!(net?.isConnected?.() || (isStartedSave && armedSave.lobbyMode === 'Online'));
+    const armedCard = armedDraft || (isStartedSave ? armedSave : null);
+    const pendingMatchName = String(this.config.pendingMatchName || (net?.isConnected?.() ? net.matchName : '') || '').trim();
+    const lobbyLeft = armedCard ? (armedCard.matchName || armedCard.name || 'New Match') : (pendingMatchName || 'New Match');
     const mcStatus = mc?.getSavedStatusLabel ? mc.getSavedStatusLabel() : 'Saved';
 
     this.renderColumn('Game Menu', false, [
+      isGuestWaiting
+        ? {
+            type: 'base', id: 'begin-match-waiting',
+            title: 'Waiting for Host',
+            color: '#10f000',
+            isReadOnly: true
+          }
+        : {
+            type: 'base', id: 'begin-match',
+            title: isStartedSave ? 'Enter Match' : 'Begin Match',
+            color: '#10f000',
+            ghost: isStartedSave && !guestCanEnter,
+            onClick: () => self.launchMatch()
+          },
       {
         type: 'preset_name', id: 'menu-presets',
         title: levelTitle,
         categoryIndexText: 'Level',
-        color: (armedSave || isGuestWaiting) ? '#953ffd' : '#10f000',
+        color: (isStartedSave || isGuestWaiting) ? '#953ffd' : '#10f000',
         onClick: () => {
-          if (armedSave && typeof self.renderSavedMatchLevelView === 'function') {
-            self.pushColumn('Level (View Only)', () => self.renderSavedMatchLevelView(armedSave));
-          } else if (isGuestWaiting && typeof self.renderSavedMatchLevelView === 'function') {
-            self.pushColumn('Level (View Only)', () => self.renderSavedMatchLevelView({
-              presetName: net.hostPresetName || 'Host Preset',
-              boardRadius: net.hostMatchConfig?.boardRadius || 6,
-              round: 1,
-              matchConfig: net.hostMatchConfig || {}
-            }));
+          if (isStartedSave || isGuestWaiting) {
+            const roPreset = self.getReadOnlyLevelPreset?.() || curPreset;
+            self.pushColumn('Preset Settings', () => self.renderPresetSettingsColumn(roPreset, 0, true));
           } else {
             self.pushColumn('Presets', () => self.renderFusedPresetColumn());
           }
@@ -77,45 +85,25 @@
       },
       {
         type: 'preset_name', id: 'single-multiplayer',
-        title: playersLeft,
-        categoryIndexText: playersRight,
-        color: isOnline ? '#3d6eff' : '#10f000',
-        isDoubleBorder: isOnline,
+        title: lobbyLeft,
+        categoryIndexText: 'Lobby',
+        color: '#10f000',
+        isDoubleBorder: false,
         onClick: () => {
           if (isGuestWaiting && global.RoomStatCanvas?.open) {
             global.RoomStatCanvas.open({ origin: 'pod-preset-single-multiplayer' });
             return;
           }
-          self.pushColumn('Players', () => self.renderMultiplayerColumn());
+          self.pushColumn('Lobby', () => self.renderMultiplayerColumn());
         }
       },
-      {
-        type: 'preset_name', id: 'saved-matches',
-        title: matchTitle,
-        categoryIndexText: 'Matches',
-        color: armedSave ? '#ff8800' : '#10f000',
-        isDoubleBorder: !!armedSave,
-        onClick: () => self.pushColumn('Saved Matches', () => self.renderSavedMatchesColumn())
-      },
-      isGuestWaiting
-        ? {
-            type: 'base', id: 'begin-match-waiting',
-            title: 'Waiting for Host',
-            color: '#953ffd',
-            isReadOnly: true
-          }
-        : {
-            type: 'base', id: 'begin-match',
-            title: 'Begin Match',
-            color: '#10f000',
-            onClick: () => self.launchMatch()
-          },
       {
         type: 'preset_name', id: 'memory-card-btn',
         title: 'Memory Card',
         categoryIndexText: mcStatus,
-        color: (mcStatus === 'Saved') ? '#10f000' : '#ff8800',
-        isDoubleBorder: (mcStatus === 'Unsaved'),
+        color: '#10f000',
+        isDoubleBorder: false,
+        isRightSubDoubleOrange: (mcStatus === 'Unsaved'),
         onClick: () => self.pushColumn('Memory Card', () => self.renderMemoryCardColumn())
       }
     ]);
@@ -128,7 +116,7 @@
     const tagInt = parseInt(nextTag, 10) || (list.length + 1);
     const copy = JSON.parse(JSON.stringify(sourcePreset));
     copy.id = `preset_${Date.now()}`;
-    copy.name = `${sourcePreset.name} (Copy)`;
+    copy.name = this.formatCopyName ? this.formatCopyName(sourcePreset.name) : `${sourcePreset.name} (Copy)`;
     copy.tagNumber = nextTag;
     copy.isDefault = false;
 
@@ -154,6 +142,7 @@
     self.sortPresetList(list);
     let activeIdx = Math.max(0, Math.min(list.length - 1, this.config.activePresetIndex || 0));
     const isDeleteMode = !!self.isPresetDeleteMode && (self._presetDeleteCategory === 'Preset');
+    const isCopyMode = !isDeleteMode && !!self.isPresetCopyMode && (self._presetCopyCategory === 'Preset');
     const pendingDel = self._pendingDeleteIds || (self._pendingDeleteIds = new Set());
     const visibleEntries = list.map((item, idx) => ({ item, idx })).filter(e => !pendingDel.has(e.item.id));
 
@@ -168,6 +157,8 @@
       let isDouble = false;
       if (isDeleteMode) {
         itemColor = isDef ? '#64748b' : '#ff3333';
+      } else if (isCopyMode) {
+        itemColor = '#fff700';
       } else if (isChosen) {
         itemColor = '#ff9214';
         isDouble = true;
@@ -203,9 +194,40 @@
             };
             global.GameState?.showToast?.(`⏳ Staged "${item.name}" for deletion — press Confirm to finalize or Return to cancel`);
             self.buildScene();
+          } else if (isCopyMode) {
+            const nextTag = self.getNextUniqueTag(list);
+            const tagInt = parseInt(nextTag, 10) || (list.length + 1);
+            const newItem = JSON.parse(JSON.stringify(item));
+            newItem.id = `preset_${Date.now()}`;
+            newItem.name = self.formatCopyName ? self.formatCopyName(item.name) : `${item.name} (Copy)`;
+            newItem.tagNumber = nextTag;
+            newItem.isDefault = false;
+
+            if (global.GameSettingsRenamePopup?.open) {
+              global.GameSettingsRenamePopup.open(newItem, 'Preset', tagInt, () => {
+                self.isPresetCopyMode = false;
+                self._presetCopyCategory = null;
+                list.push(newItem);
+                const newIdx = self.sortPresetList(list, newItem);
+                self.config.activePresetIndex = newIdx;
+                global.GameState?.showToast?.(`✦ Copied Preset: "${newItem.name}"`);
+                self.buildScene();
+                self.activePresetDraft = {
+                  targetPreset: newItem,
+                  index: newIdx,
+                  draftItem: JSON.parse(JSON.stringify(newItem)),
+                  originalSnapshot: JSON.stringify(newItem),
+                  isDefault: false,
+                  previousActiveIndex: newIdx
+                };
+                self.pushColumn('Preset Settings', () => self.renderPresetSettingsColumn(newItem, newIdx));
+              }, list, { isAddNew: true, originNode: `pod-preset-fused-preset-opt-${idx}` });
+            }
           } else {
             self.isPresetDeleteMode = false;
             self._presetDeleteCategory = null;
+            self.isPresetCopyMode = false;
+            self._presetCopyCategory = null;
             self.activePresetDraft = {
               targetPreset: item,
               index: idx,
@@ -220,39 +242,20 @@
       };
     });
 
-    // Add New Button (Phase-Blue)
+    // Copy Button (Yellow toggle, turns selectable presets yellow)
     items.push({
-      type: 'base', id: 'preset-add-new-fused', title: 'Add New', color: '#3d6eff',
+      type: 'base', id: 'preset-copy-fused', title: isCopyMode ? '✖ Cancel Copy' : 'Copy', color: '#fff700',
       onClick: () => {
         self.isPresetDeleteMode = false;
         self._presetDeleteCategory = null;
-        const nextTag = self.getNextUniqueTag(list);
-        const tagInt = parseInt(nextTag, 10) || (list.length + 1);
-        const template = list[activeIdx] || list[0] || {};
-        const newItem = JSON.parse(JSON.stringify(template));
-        newItem.id = `preset_${Date.now()}`;
-        newItem.name = `Preset ${tagInt}`;
-        newItem.tagNumber = nextTag;
-        newItem.isDefault = false;
-
-        if (global.GameSettingsRenamePopup?.open) {
-          global.GameSettingsRenamePopup.open(newItem, 'Preset', tagInt, () => {
-            list.push(newItem);
-            const newIdx = self.sortPresetList(list, newItem);
-            self.config.activePresetIndex = newIdx;
-            global.GameState?.showToast?.(`✦ Created Preset: "${newItem.name}"`);
-            self.buildScene();
-            self.activePresetDraft = {
-              targetPreset: newItem,
-              index: newIdx,
-              draftItem: JSON.parse(JSON.stringify(newItem)),
-              originalSnapshot: JSON.stringify(newItem),
-              isDefault: false,
-              previousActiveIndex: newIdx
-            };
-            self.pushColumn('Preset Settings', () => self.renderPresetSettingsColumn(newItem, newIdx));
-          }, list, { isAddNew: true });
+        if (isCopyMode) {
+          self.isPresetCopyMode = false;
+          self._presetCopyCategory = null;
+        } else {
+          self.isPresetCopyMode = true;
+          self._presetCopyCategory = 'Preset';
         }
+        self.buildScene();
       }
     });
 
@@ -260,6 +263,8 @@
     items.push({
       type: 'base', id: 'preset-delete-fused', title: isDeleteMode ? '✖ Cancel Delete' : 'Delete', color: '#ff3333',
       onClick: () => {
+        self.isPresetCopyMode = false;
+        self._presetCopyCategory = null;
         if (isDeleteMode) {
           self.isPresetDeleteMode = false;
           self._presetDeleteCategory = null;
@@ -275,15 +280,20 @@
   };
 
   // ── 1C. PRESET SETTINGS COLUMN (NAME, MATCH, LUCK, BLIGHT) ───────────────
-  Proto.renderPresetSettingsColumn = function(preset, idx) {
+  Proto.renderPresetSettingsColumn = function(preset, idx, forceReadOnly = false) {
     const self = this;
-    const cur = self.getActiveWorkingPreset ? self.getActiveWorkingPreset() : (preset || this.config.presets?.[0]);
+    const ro = !!(forceReadOnly || this.isMatchReadOnly?.());
+    const cur = ro
+      ? (this.getReadOnlyLevelPreset?.() || preset || this.config.presets?.[0])
+      : (self.getActiveWorkingPreset ? self.getActiveWorkingPreset() : (preset || this.config.presets?.[0]));
     const isDef = !!cur.isDefault;
 
     this.renderColumn('Preset Settings', true, [
       {
-        type: 'base', id: 'fused-preset-name-btn', title: cur.name, color: '#fff700', underline: true,
+        type: 'base', id: 'fused-preset-name-btn', title: cur.name, color: ro ? '#953ffd' : '#fff700', underline: true,
+        isReadOnly: ro,
         onClick: () => {
+          if (ro) return;
           if (isDef) {
             const draft = self.activePresetDraft;
             const source = draft?.draftItem || cur;
@@ -306,16 +316,16 @@
         }
       },
       {
-        type: 'base', id: 'fused-match-settings-btn', title: 'Match Settings', color: '#ff3333',
-        onClick: () => self.pushColumn('Match Settings', () => self.renderMatchSettingsColumn(cur))
+        type: 'base', id: 'fused-match-settings-btn', title: 'Match Settings', color: ro ? '#953ffd' : '#ff3333',
+        onClick: () => self.pushColumn('Match Settings', () => self.renderMatchSettingsColumn(cur, ro))
       },
       {
-        type: 'base', id: 'fused-luck-settings-btn', title: 'Luck Settings', color: '#3d6eff',
-        onClick: () => self.pushColumn('Luck Settings', () => self.renderDualVectorColumn('luck', cur))
+        type: 'base', id: 'fused-luck-settings-btn', title: 'Luck Settings', color: ro ? '#953ffd' : '#3d6eff',
+        onClick: () => self.pushColumn('Luck Settings', () => self.renderDualVectorColumn('luck', cur, ro))
       },
       {
         type: 'base', id: 'fused-blight-settings-btn', title: 'Blight Settings', color: '#953ffd',
-        onClick: () => self.pushColumn('Blight Settings', () => self.renderDualVectorColumn('blight', cur))
+        onClick: () => self.pushColumn('Blight Settings', () => self.renderDualVectorColumn('blight', cur, ro))
       }
     ]);
   };

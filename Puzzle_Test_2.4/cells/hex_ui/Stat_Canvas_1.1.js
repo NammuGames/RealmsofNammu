@@ -48,13 +48,24 @@
     const seeds = this.playerSeeds[playerIndex % this.playerSeeds.length];
     const spCfg = global.NativeStatPod?.config || {};
     const cfg = this.config;
+    const net = global.NetworkP2PManager;
+    const seatIdx = (player.seatIndex !== undefined) ? player.seatIndex : Math.max(0, (player.id || 1) - 1);
+    const isLocalSeat = !net || net.role === 'offline' || net.isSeatLocal(seatIdx);
+    const isSeatOnline = !net || net.role === 'offline' || net.isSeatOnline(seatIdx);
+    const frameColor = isLocalSeat ? '#10f000' : '#3d6eff';
+    const povIdx = global.POVManager?.getPOVIndex?.();
+    const isCurrentPOV = (povIdx !== undefined && povIdx === seatIdx) && isLocalSeat;
+    const isActiveTurn = (player.id === (global.GameState?.currentPlayerId || 1));
+    const podInnerCol = isCurrentPOV ? '#ff9214' : frameColor;
 
     const podNode = new HexNode({
       id: `stat-canvas-player-pod-${player.id}`, wBase: cfg.playerPodWidth, hBase: cfg.playerPodHeight, apex: cfg.playerPodApex, orientation: 'flat',
       style: {
-        bgColor: 'rgba(7, 12, 24, 0.93)', bgOpacity: 1.0,
-        innerHighlight: { enabled: true, color: '#10f000', sharpEdgeColor: '#10f000', spread: 8, intensity: 0.80, steps: 3 },
-        outerHighlight: { enabled: false }
+        bgColor: isCurrentPOV ? 'rgba(28, 18, 8, 0.95)' : 'rgba(7, 12, 24, 0.93)', bgOpacity: 1.0,
+        innerHighlight: { enabled: true, color: podInnerCol, sharpEdgeColor: podInnerCol, spread: 8, intensity: isCurrentPOV ? 0.85 : 0.80, steps: 3 },
+        outerHighlight: isCurrentPOV
+          ? { enabled: true, color: '#ff9214', sharpEdgeColor: '#ff9214', blur: 8, intensity: 0.85, steps: 3 }
+          : { enabled: false }
       }
     });
     if (this.playerSelectCallback && global.HexTraits?.ButtonTrait) {
@@ -62,8 +73,9 @@
       const filterFn = this.playerSelectOptions?.isSelectable;
       const isSelectable = (typeof filterFn === 'function') ? !!filterFn(player, playerIndex) : true;
       if (isSelectable) {
+        podNode.isSidebarButton = true;
         podNode.addTrait(new global.HexTraits.ButtonTrait({
-          hoverGlowColor: '#10f000',
+          hoverGlowColor: '#ff9214',
           soundClick: false,
           onClick: () => {
             this.playerSelectCallback = null;
@@ -74,11 +86,31 @@
       } else {
         podNode.setGhost(true);
       }
+    } else {
+      // Normal in-match StatCanvas: ghost offline players; local green pods switch POV on click
+      if (!isSeatOnline) {
+        podNode.setGhost(true);
+      }
+      if (isLocalSeat && global.HexTraits?.ButtonTrait) {
+        podNode.isSidebarButton = true;
+        podNode.addTrait(new global.HexTraits.ButtonTrait({
+          hoverGlowColor: '#ff9214',
+          soundClick: false,
+          onClick: () => {
+            if (global.POVManager?.setPOV) {
+              global.POVManager.setPOV(seatIdx);
+            } else if (global.GameState) {
+              global.GameState.povPlayerIndex = seatIdx;
+            }
+            this.close(false);
+          }
+        }));
+      }
     }
 
     // --- TOP ROW: 3 Stat Pairs (Player, Score, Average) ---
     const statDefs = [
-      { key: 'player', label: 'Player', val: player.id.toString() },
+      { key: 'player', label: 'Player', val: player.id.toString(), isDoubleOrange: isActiveTurn },
       { key: 'score', label: 'Score', val: player.score.toString() },
       { key: 'ave', label: 'Average', val: (typeof player.average === 'number' ? (player.average >= 100 ? Math.round(player.average) : Number(player.average.toFixed(player.average >= 10 ? 1 : 2))) : player.average).toString() }
     ];
@@ -249,13 +281,17 @@
       typeNode.inert = true;
       parentPod.addChild(typeNode);
 
-      // Value Node (Phase Blue #3d6eff with variables Y offset)
+      // Value Node (Phase Blue #3d6eff by default, or Standard Double Orange #ff9214 for active turn number)
+      const valCol = m.def.isDoubleOrange ? '#ff9214' : '#3d6eff';
       const valNode = new HexNode({
         id: `stat-val-${m.def.key}`, wBase: m.rightWBase, hBase: statHeight, apex: statApex, orientation: 'flat',
         position: { x: Math.round(typeNode.position.x + m.dx), y: posY },
         style: {
           bgColor: '#0f172a', bgOpacity: 1.0,
-          innerHighlight: { enabled: true, color: '#3d6eff', sharpEdgeColor: '#3d6eff', spread: 8, intensity: 0.65, lineWidth: 1.4, steps: 3 }, outerHighlight: { enabled: false }
+          innerHighlight: { enabled: true, color: valCol, sharpEdgeColor: valCol, spread: 8, intensity: m.def.isDoubleOrange ? 0.80 : 0.65, lineWidth: 1.4, steps: 3 },
+          outerHighlight: m.def.isDoubleOrange
+            ? { enabled: true, color: '#ff9214', sharpEdgeColor: '#ff9214', blur: 8, intensity: 0.80, steps: 3 }
+            : { enabled: false }
         }
       });
       valNode.addTrait({

@@ -29,6 +29,7 @@
       this.lastFpsUpdate = 0;
       this.cpuTimeAvg = 0.85;
       this.lastTelemetryUpdate = 0;
+      this._lowFpsStreak = 0;
     }
 
     init(state, dom, warp, engine, polyRender, cameraCtrl, deck, deckSync) {
@@ -81,12 +82,12 @@
       const deck = this.deck;
       const deckSync = this.deckSync;
 
-      // Mobile Power Saver: gate JS simulation & rendering to 30 FPS on phones/tablets only; Desktop caps at 60 Hz via FIXED_DT
-      const isMobileRender = (typeof window !== 'undefined') && (
+      // Mobile / Low-Spec Power Saver: gate JS render to 30 FPS while simulation keeps 60 Hz FIXED_DT
+      const isLiteRender = !!(global.DevicePerfProfile?.isLiteMode?.() || ((typeof window !== 'undefined') && (
         window.matchMedia?.('(pointer: coarse)')?.matches ||
         Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560
-      );
-      if (isMobileRender && this.lastRenderMs && (now - this.lastRenderMs) < 32.0) {
+      )));
+      if (isLiteRender && this.lastRenderMs && (now - this.lastRenderMs) < 32.0) {
         return;
       }
 
@@ -150,6 +151,12 @@
         const fps = Math.round((this.frameCount * 1000) / elapsed);
         const avgFrameMs = elapsed / Math.max(1, this.frameCount);
         this.actualFps = fps;
+        const perf = global.DevicePerfProfile;
+        if (perf && !perf.isLiteMode() && fps > 0 && fps < 38) {
+          if (++this._lowFpsStreak >= 3) perf.markRuntimeDowngrade();
+        } else {
+          this._lowFpsStreak = 0;
+        }
 
         if (global.__NAMMU_DEV_DRAWERS__) {
           if (dom.valFps) dom.valFps.textContent = fps.toString();

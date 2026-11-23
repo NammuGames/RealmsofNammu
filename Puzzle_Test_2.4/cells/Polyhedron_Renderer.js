@@ -143,7 +143,7 @@
         return;
       }
 
-      if (this.loopCache && this.POLYHEDRON_MAP[colorName]) {
+      if (this.loopCache && this.loopCache.enabled && this.POLYHEDRON_MAP[colorName]) {
         const finalAlpha = (customAlpha !== null && customAlpha !== undefined)
           ? customAlpha
           : (isGhost ? 0.65 : 1.0);
@@ -176,14 +176,19 @@
         const it = items[i];
         if (it.colorName === 'disease') {
           this.drawComponent(ctx, it.cx, it.cy, it.radius, it.colorName, time, it.isGhost, it.isOffBoard, it.customAlpha, it.seedPhase, it.seedTilt);
-        } else if (this.loopCache && this.POLYHEDRON_MAP[it.colorName]) {
+        } else if (this.loopCache && this.loopCache.enabled && this.POLYHEDRON_MAP[it.colorName]) {
           const finalAlpha = (it.customAlpha !== null && it.customAlpha !== undefined) ? it.customAlpha : (it.isGhost ? 0.65 : 1.0);
           cached.push({ cx: it.cx, cy: it.cy, radius: it.radius, colorName: it.colorName, customAlpha: finalAlpha, seedPhase: it.seedPhase, seedTilt: it.seedTilt });
         } else {
           this.drawComponent(ctx, it.cx, it.cy, it.radius, it.colorName, time, it.isGhost, it.isOffBoard, it.customAlpha, it.seedPhase, it.seedTilt);
         }
       }
-      if (cached.length > 0 && this.loopCache) this.loopCache.drawBatch(ctx, cached, effTime);
+      if (cached.length > 0 && this.loopCache && !this.loopCache.drawBatch(ctx, cached, effTime)) {
+        for (let i = 0; i < cached.length; i++) {
+          const it = cached[i];
+          this.drawComponent(ctx, it.cx, it.cy, it.radius, it.colorName, time, false, false, it.customAlpha, it.seedPhase, it.seedTilt);
+        }
+      }
     }
 
     renderProjectedPolyhedron(ctx, cx, cy, radius, model, rx, ry, rz, colorName, style, isGhost = false, customAlpha = null) {

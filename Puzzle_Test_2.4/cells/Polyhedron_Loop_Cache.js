@@ -16,21 +16,31 @@
 
   class PolyhedronLoopCacheClass {
     constructor() {
-      const isMobile = typeof window !== 'undefined' && (
-        window.matchMedia?.('(pointer: coarse)')?.matches ||
-        Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560
-      );
-      this.duration = 6.0;      // 6.0 seconds per seamless harmonic cycle
-      this.frameCount = 720;    // 720 frames (30x24) = 120 fps native capture rate (supports 0.1x ultra-slow tumble)
-      this.cols = 30;
-      this.frameSize = isMobile ? 64 : 96;
-      this.baseRadius = isMobile ? (46.0 * (64 / 96)) : 46.0;
       this.enabled = true;
       this.dirty = true;
       this.polyRender = null;
       this.sheets = {};
-
       this.COLORS = ['red', 'blue', 'yellow', 'purple', 'orange', 'green', 'ether'];
+      this._configureTier();
+    }
+
+    _configureTier() {
+      const perf = global.DevicePerfProfile;
+      const isTouch = typeof window !== 'undefined' && (
+        window.matchMedia?.('(pointer: coarse)')?.matches || Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560
+      );
+      const isLite = !!(perf?.isLiteMode?.() || isTouch);
+      const maxTex = perf?.maxTextureSize || 8192;
+      const ultraCap = (maxTex > 0 && maxTex <= 2048) || (perf?.deviceMemory && perf.deviceMemory <= 2);
+
+      this.duration = 6.0;
+      if (ultraCap) {
+        this.frameCount = 360; this.cols = 20; this.frameSize = 64; this.baseRadius = 46.0 * (64 / 96);
+      } else if (isLite) {
+        this.frameCount = 720; this.cols = 30; this.frameSize = 64; this.baseRadius = 46.0 * (64 / 96);
+      } else {
+        this.frameCount = 720; this.cols = 30; this.frameSize = 96; this.baseRadius = 46.0;
+      }
       this.frameSX = new Int16Array(this.frameCount);
       this.frameSY = new Int16Array(this.frameCount);
       this.initLUT();
@@ -50,6 +60,19 @@
       if (polyRender) {
         polyRender.loopCache = this;
       }
+      if (!this._perfBound && global.DevicePerfProfile?.onChange) {
+        this._perfBound = true;
+        global.DevicePerfProfile.onChange(() => {
+          const prevSize = this.frameSize;
+          const prevCount = this.frameCount;
+          this._configureTier();
+          if (this.frameSize !== prevSize || this.frameCount !== prevCount) {
+            this.sheets = {};
+            this.dirty = true;
+          }
+        });
+      }
+      this._configureTier();
       this.bakeAll();
       return this;
     }
@@ -58,8 +81,27 @@
       this.dirty = true;
     }
 
+    _verifySheetDrawable(sheet) {
+      if (!sheet?.canvas || !sheet.ctx) return false;
+      try {
+        const probe = document.createElement('canvas');
+        probe.width = 8; probe.height = 8;
+        const pCtx = probe.getContext('2d');
+        if (!pCtx) return false;
+        const half = Math.floor(this.frameSize * 0.5);
+        pCtx.drawImage(sheet.canvas, Math.max(0, half - 4), Math.max(0, half - 4), 8, 8, 0, 0, 8, 8);
+        const data = pCtx.getImageData(0, 0, 8, 8).data;
+        for (let i = 3; i < data.length; i += 4) {
+          if (data[i] > 0) return true;
+        }
+        return false;
+      } catch (_) {
+        return false;
+      }
+    }
+
     bakeColor(colorName) {
-      if (!this.polyRender) return null;
+      if (!this.polyRender || !this.enabled) return null;
       const poly = this.polyRender;
       const modelKey = poly.POLYHEDRON_MAP[colorName];
       if (!modelKey || !poly.models[modelKey]) return null;
@@ -78,46 +120,54 @@
         const canvas = document.createElement('canvas');
         canvas.width = sheetW;
         canvas.height = sheetH;
-        sheet = { canvas, ctx: canvas.getContext('2d', { alpha: true }) };
+        const sCtx = canvas.getContext('2d', { alpha: true });
+        if (!sCtx) { this.enabled = false; this.sheets = {}; return null; }
+        sheet = { canvas, ctx: sCtx };
         this.sheets[colorName] = sheet;
       }
 
       const sCtx = sheet.ctx;
-      sCtx.clearRect(0, 0, sheetW, sheetH);
+      try {
+        sCtx.clearRect(0, 0, sheetW, sheetH);
 
-      const half = fSize * 0.5;
-      const polyR = bRad * (colorName === 'ether' ? 0.77 : 0.80);
+        const half = fSize * 0.5;
+        const polyR = bRad * (colorName === 'ether' ? 0.77 : 0.80);
 
-      // Harmonic 3-Axis Rotation Formula:
-      // Over cycle duration T = 6.0s:
-      // Pitch (rx) = 2 full turns (4 * PI)
-      // Yaw   (ry) = 3 full turns (6 * PI)
-      // Roll  (rz) = 1 full turn  (2 * PI)
-      for (let k = 0; k < this.frameCount; k++) {
-        const tau = k / this.frameCount;
-        const theta = tau * Math.PI * 2;
-        const rx = 2 * theta;
-        const ry = 3 * theta;
-        const rz = 1 * theta;
+        for (let k = 0; k < this.frameCount; k++) {
+          const tau = k / this.frameCount;
+          const theta = tau * Math.PI * 2;
+          const rx = 2 * theta;
+          const ry = 3 * theta;
+          const rz = 1 * theta;
 
-        const col = k % cols;
-        const row = Math.floor(k / cols);
-        const cx = col * fSize + half;
-        const cy = row * fSize + half;
+          const col = k % cols;
+          const row = Math.floor(k / cols);
+          const cx = col * fSize + half;
+          const cy = row * fSize + half;
 
-        poly.renderProjectedPolyhedron(
-          sCtx, cx, cy, polyR, model,
-          rx, ry, rz, colorName, style, false, 1.0
-        );
+          poly.renderProjectedPolyhedron(
+            sCtx, cx, cy, polyR, model,
+            rx, ry, rz, colorName, style, false, 1.0
+          );
+        }
+      } catch (_) {
+        this.enabled = false;
+        this.sheets = {};
+        return null;
       }
 
       return sheet;
     }
 
     bakeAll() {
-      if (!this.polyRender) return;
+      if (!this.polyRender || !this.enabled) return;
       for (let i = 0; i < this.COLORS.length; i++) {
-        this.bakeColor(this.COLORS[i]);
+        const sheet = this.bakeColor(this.COLORS[i]);
+        if (!sheet || (i === 0 && !this._verifySheetDrawable(sheet))) {
+          this.enabled = false;
+          this.sheets = {};
+          return;
+        }
       }
       this.dirty = false;
     }

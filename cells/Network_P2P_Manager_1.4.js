@@ -213,6 +213,9 @@
   /** Called by RoomStatCanvas when clicking active "Enter Match" on a saved Host/Guest resume. */
   proto.enterLoadedMatch = async function() {
     this._awaitingEnterMatch = false;
+    if (global.GameSettingsCanvas?.isOpen?.()) {
+      global.GameSettingsCanvas.close();
+    }
     if (this.role === 'guest' && this.pendingMatchStartSnap) {
       const pending = this.pendingMatchStartSnap;
       this.pendingMatchStartSnap = null;

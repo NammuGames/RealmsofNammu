@@ -62,6 +62,16 @@
           if (this.hostPeerId && this.hostOnline) this.onlinePeerIds.add(this.hostPeerId);
         }
       }
+      if (this.role === 'guest' && msg.matchStarted && msg.roomCode) {
+        const gsc = global.GameSettingsCanvas;
+        if (gsc && !gsc.selectedSavedMatchId) {
+          const matchingSave = global.MemoryCardManager?.findSaveByRoomCode?.(msg.roomCode);
+          if (matchingSave && !matchingSave.isDraft) {
+            gsc.clearArmedDraft?.();
+            gsc.selectedSavedMatchId = matchingSave.id;
+          }
+        }
+      }
       this._updateDrawerUI();
       this._notifyLobbyUpdate();
       return;

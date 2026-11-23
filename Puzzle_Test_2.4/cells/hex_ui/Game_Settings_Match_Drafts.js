@@ -328,12 +328,8 @@
     const self = this;
     const net = global.NetworkP2PManager;
     const mc = global.MemoryCardManager;
-    if (net?.role === 'guest' && net?.isConnected?.()) {
-      global.GameState?.showToast?.('⏳ Waiting for Host to start the match...');
-      return;
-    }
-
     const armedSave = this.getArmedSavedMatch ? this.getArmedSavedMatch() : null;
+
     if (armedSave && armedSave.matchType !== 'Draft') {
       if (armedSave.matchType === 'Guest') {
         if (net && !net.isHostOnline?.()) {
@@ -374,6 +370,11 @@
       if (net && net.role !== 'offline') net.leaveRoom?.();
       mc?.restorePuzzleState?.(armedSave);
       global.GameState?.showToast?.(`✦ Entered "${armedSave.matchName || armedSave.name || 'Local Match'}"`);
+      return;
+    }
+
+    if (net?.role === 'guest' && net?.isConnected?.()) {
+      global.GameState?.showToast?.('⏳ Waiting for Host to start the match...');
       return;
     }
 

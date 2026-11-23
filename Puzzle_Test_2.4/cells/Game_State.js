@@ -428,6 +428,7 @@
       this.board.clear();
       global.ComponentDisease?.reset?.();
       global.UndoManager?.clearTurnHistory?.();
+      global.TurnLogManager?.reset?.();
       this.evaluateSigils();
       global.UISidebarDeck?.closeMaterialsColumn?.(true);
       this.syncUI();

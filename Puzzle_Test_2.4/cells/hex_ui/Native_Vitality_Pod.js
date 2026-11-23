@@ -133,6 +133,7 @@
           const backBgOp = cState.tileBgOpacity ?? 0.40;
           const backBorderOp = cState.tileBorderOpacity ?? 0.80;
 
+          const hpBatch = [];
           for (let i = 0; i < 12; i++) {
             const sx = startX + i * slotPitch, sy = 0, hasHp = (i < hp), isPending = (i < netCount);
 
@@ -146,25 +147,31 @@
               ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)'; ctx.lineWidth = 1.0 * s; ctx.stroke();
             }
 
-            // 2. Render 3D Polyhedron underneath the pending overlay (Vitality Green Cuboctahedron)
-            if (hasHp && polyRender?.drawComponent) {
-              polyRender.drawComponent(ctx, sx, sy, compSize, 'green', time, false, false, 1.0, self.hpSeeds[i].phase, self.hpSeeds[i].tilt);
+            if (hasHp) {
+              hpBatch.push({ cx: sx, cy: sy, radius: compSize, colorName: 'green', customAlpha: 1.0, seedPhase: self.hpSeeds[i].phase, seedTilt: self.hpSeeds[i].tilt });
             }
+          }
 
-            // 3. Render Pending Back-Tile Layered ON TOP (0.40 fill / 0.80 inner & 1-step outer border)
-            if (isPending) {
-              const pulse = 0.5 + 0.5 * Math.sin(time * 2.2 - i * 0.50);
-              const pBg = Math.min(1.0, backBgOp * (0.75 + 0.50 * pulse)), pBorder = Math.min(1.0, backBorderOp * (0.75 + 0.50 * pulse)), isDmg = net < 0;
-              // 1-Step Outer Border: Feral green (#0abd0d) for PH, Silver (#cbd5e1) for PD
-              drawPointyHex(ctx, sx, sy, R + 1.8 * s);
-              ctx.strokeStyle = isDmg ? `rgba(203, 213, 225, ${pBorder})` : `rgba(10, 189, 13, ${pBorder})`;
-              ctx.lineWidth = 1.2 * s; ctx.stroke();
-              // Back-Tile Fill & Inner Border: Grey (#64748b / #94a3b8) for PD, Feral brown (#a66a26) for PH
-              drawPointyHex(ctx, sx, sy, R);
-              ctx.fillStyle = isDmg ? `rgba(100, 116, 139, ${pBg})` : `rgba(166, 106, 38, ${pBg})`; ctx.fill();
-              ctx.strokeStyle = isDmg ? `rgba(148, 163, 184, ${pBorder})` : `rgba(166, 106, 38, ${pBorder})`;
-              ctx.lineWidth = 1.8 * s; ctx.stroke();
-            }
+          // 2. Render 3D Polyhedra batch underneath the pending overlay (Vitality Green Cuboctahedron)
+          if (hpBatch.length > 0 && polyRender) {
+            if (typeof polyRender.drawBatch === 'function') polyRender.drawBatch(ctx, hpBatch, time);
+            else hpBatch.forEach(it => polyRender.drawComponent(ctx, it.cx, it.cy, it.radius, it.colorName, time, false, false, 1.0, it.seedPhase, it.seedTilt));
+          }
+
+          // 3. Render Pending Back-Tile Layered ON TOP (0.40 fill / 0.80 inner & 1-step outer border)
+          for (let i = 0; i < netCount && i < 12; i++) {
+            const sx = startX + i * slotPitch, sy = 0;
+            const pulse = 0.5 + 0.5 * Math.sin(time * 2.2 - i * 0.50);
+            const pBg = Math.min(1.0, backBgOp * (0.75 + 0.50 * pulse)), pBorder = Math.min(1.0, backBorderOp * (0.75 + 0.50 * pulse)), isDmg = net < 0;
+            // 1-Step Outer Border: Feral green (#0abd0d) for PH, Silver (#cbd5e1) for PD
+            drawPointyHex(ctx, sx, sy, R + 1.8 * s);
+            ctx.strokeStyle = isDmg ? `rgba(203, 213, 225, ${pBorder})` : `rgba(10, 189, 13, ${pBorder})`;
+            ctx.lineWidth = 1.2 * s; ctx.stroke();
+            // Back-Tile Fill & Inner Border: Grey (#64748b / #94a3b8) for PD, Feral brown (#a66a26) for PH
+            drawPointyHex(ctx, sx, sy, R);
+            ctx.fillStyle = isDmg ? `rgba(100, 116, 139, ${pBg})` : `rgba(166, 106, 38, ${pBg})`; ctx.fill();
+            ctx.strokeStyle = isDmg ? `rgba(148, 163, 184, ${pBorder})` : `rgba(166, 106, 38, ${pBorder})`;
+            ctx.lineWidth = 1.8 * s; ctx.stroke();
           }
         }
       });
@@ -193,6 +200,7 @@
           const compSize = 7.5 * s;
           const bag = self.componentsBag || [];
 
+          const compBatch = [];
           for (let i = 0; i < 12; i++) {
             const sx = startX + i * slotPitch, sy = 0, comp = (i < bag.length) ? bag[i] : null;
             const compColor = (typeof comp === 'object' && comp) ? comp.color : comp;
@@ -215,9 +223,13 @@
               ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)'; ctx.lineWidth = 1.0 * s; ctx.stroke();
             }
 
-            if (compColor && polyRender?.drawComponent) {
-              polyRender.drawComponent(ctx, sx, sy, compSize, compColor, time, false, false, 0.95, self.bagSeeds[i].phase, self.bagSeeds[i].tilt);
+            if (compColor) {
+              compBatch.push({ cx: sx, cy: sy, radius: compSize, colorName: compColor, customAlpha: 0.95, seedPhase: self.bagSeeds[i].phase, seedTilt: self.bagSeeds[i].tilt });
             }
+          }
+          if (compBatch.length > 0 && polyRender) {
+            if (typeof polyRender.drawBatch === 'function') polyRender.drawBatch(ctx, compBatch, time);
+            else compBatch.forEach(it => polyRender.drawComponent(ctx, it.cx, it.cy, it.radius, it.colorName, time, false, false, 0.95, it.seedPhase, it.seedTilt));
           }
         }
       });

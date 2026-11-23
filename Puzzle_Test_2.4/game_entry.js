@@ -89,6 +89,7 @@
     'cells/Input_Controller.js',
     'cells/Polyhedron_Models.js',
     'cells/Polyhedron_Renderer.js',
+    'cells/Polyhedron_Loop_Cache_1.0.js',
     'cells/Polyhedron_Loop_Cache.js',
     'cells/hex_ui/Sigil_Emblem_Renderer_1.0.js',
     'cells/hex_ui/Sigil_Emblem_Renderer_1.1.js',

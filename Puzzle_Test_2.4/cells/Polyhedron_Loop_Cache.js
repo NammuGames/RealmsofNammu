@@ -1,343 +1,393 @@
 /**
- * @fileoverview cells/Polyhedron_Loop_Cache.js - WebGL 3D Polyhedron Batch Compositor (Part 2/2)
- * @description Projects 3D polyhedral meshes at continuous 60/120 Hz angles into DPR-scaled WebGL
- * slots (64px / 128px / 256px) with crystalline shading, dual neon laser strokes, specular flashes,
- * vertex glow nodes, and Ether face orbs, then composites batches onto Canvas 2D contexts.
- * Strictly adheres to the 500-line hard cap and underscore naming conventions.
+ * Polyhedron_Loop_Cache.js
+ * 
+ * High-performance 3-Axis Harmonic Pre-Rendered Sprite Sheet Cache for ALL polyhedra.
+ * Unified Single-Tier Strategy (Hero Resolution = 96px, 720 frames, 30x24 2D grid matrix).
+ * 
+ * Pre-bakes 1 seamless 6-second harmonic tumble cycle (X: 2 turns, Y: 3 turns, Z: 1 turn)
+ * into offscreen atlas canvases per polyhedron color.
+ * 
+ * Stamps frames via GPU-accelerated ctx.drawImage() with two deterministic pseudo-random offsets:
+ *   1. Loop Phase Offset: Staggers starting point along the 6-second tumble timeline.
+ *   2. Spatial Tilt Offset: Angles the 2D tumble plane so no two crystals tumble identically.
  */
 (function(global) {
   'use strict';
 
-  const Cls = global.PolyhedronLoopCacheClass;
-  if (!Cls) {
-    console.error('[Polyhedron_Loop_Cache] Load Polyhedron_Loop_Cache_1.0.js first.');
-    return;
-  }
-
-  const proto = Cls.prototype;
-  const CANVAS_SIZE = Cls.CANVAS_SIZE || 512;
-  const PERSPECTIVE = 4.2;
-  const SLOT_RADIUS_PAD = 1.28;
-  const REF_BASE_RADIUS = 46.0;
-  const ETHER_FACE_COLORS = ['red', 'blue', 'yellow', 'purple'];
-
-  proto._emitCrystalToSlot = function(slotCenterX, slotCenterY, innerSize, colorName, time, seedPhase, seedTilt) {
-    const poly = this.polyRender;
-    const modelKey = poly?.POLYHEDRON_MAP?.[colorName];
-    const model = modelKey ? poly.models?.[modelKey] : null;
-    if (!model) return false;
-
-    const progress = ((time / this.duration) + seedPhase) % 1.0;
-    const normP = progress < 0 ? progress + 1.0 : progress;
-    const theta = normP * Math.PI * 2;
-    const rx = 2 * theta, ry = 3 * theta, rz = theta;
-    const tilt = (seedTilt * 2.0 - 1.0) * Math.PI;
-
-    const cosX = Math.cos(rx), sinX = Math.sin(rx);
-    const cosY = Math.cos(ry), sinY = Math.sin(ry);
-    const cosZ = Math.cos(rz), sinZ = Math.sin(rz);
-    const cosT = Math.cos(tilt), sinT = Math.sin(tilt);
-
-    const isEther = (colorName === 'ether');
-    const halfInner = innerSize * 0.5;
-    const refToSlotPx = halfInner / (REF_BASE_RADIUS * SLOT_RADIUS_PAD);
-    const polyRadiusPx = (REF_BASE_RADIUS * (isEther ? 0.77 : 0.80)) * refToSlotPx;
-
-    const verts = model.vertices;
-    const numVerts = verts.length;
-    for (let i = 0; i < numVerts; i++) {
-      const v = verts[i];
-      const y1 = v[1] * cosX - v[2] * sinX;
-      const z1 = v[1] * sinX + v[2] * cosX;
-      const x2 = v[0] * cosY + z1 * sinY;
-      const z2 = -v[0] * sinY + z1 * cosY;
-      const x3 = x2 * cosZ - y1 * sinZ;
-      const y3 = x2 * sinZ + y1 * cosZ;
-
-      const xt = x3 * cosT - y3 * sinT;
-      const yt = x3 * sinT + y3 * cosT;
-
-      this._rotX[i] = xt;
-      this._rotY[i] = yt;
-      this._rotZ[i] = z2;
-
-      const pScale = PERSPECTIVE / (PERSPECTIVE + z2);
-      this._projX[i] = slotCenterX + xt * polyRadiusPx * pScale;
-      this._projY[i] = slotCenterY + yt * polyRadiusPx * pScale;
+  class PolyhedronLoopCacheClass {
+    constructor() {
+      this.enabled = true;
+      this.dirty = true;
+      this.polyRender = null;
+      this.sheets = {};
+      this._bakeToken = 0;
+      this.COLORS = ['red', 'blue', 'yellow', 'purple', 'orange', 'green', 'ether'];
+      this._configureLayout();
     }
 
-    const style = poly.overrideStyle || 'gem';
-    const lv = poly.lightVector;
-    let visibleCount = 0;
-    const faces = model.faces;
+    _configureLayout() {
+      const isMobile = typeof window !== 'undefined' && (
+        window.matchMedia?.('(pointer: coarse)')?.matches ||
+        Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560
+      );
+      this.duration = 6.0;
+      this.frameCount = 720;
+      this.frameSize = isMobile ? 64 : 96;
+      this.baseRadius = isMobile ? (46.0 * (64 / 96)) : 46.0;
 
-    for (let fIdx = 0; fIdx < faces.length; fIdx++) {
-      const fi = faces[fIdx];
-      const i0 = fi[0], i1 = fi[1], i2 = fi[2];
-      const e1x = this._rotX[i1] - this._rotX[i0], e1y = this._rotY[i1] - this._rotY[i0], e1z = this._rotZ[i1] - this._rotZ[i0];
-      const e2x = this._rotX[i2] - this._rotX[i0], e2y = this._rotY[i2] - this._rotY[i0], e2z = this._rotZ[i2] - this._rotZ[i0];
-      let nx = e1y * e2z - e1z * e2y;
-      let ny = e1z * e2x - e1x * e2z;
-      let nz = e1x * e2y - e1y * e2x;
-      const len = Math.hypot(nx, ny, nz) || 1;
-      nx /= len; ny /= len; nz /= len;
-
-      let avgZ = 0;
-      for (let k = 0; k < fi.length; k++) avgZ += this._rotZ[fi[k]];
-      avgZ /= fi.length;
-
-      let isBack = nz > 0.02;
-      if (isEther) {
-        let avgX = 0, avgY = 0;
-        for (let k = 0; k < fi.length; k++) { avgX += this._rotX[fi[k]]; avgY += this._rotY[fi[k]]; }
-        avgX /= fi.length; avgY /= fi.length;
-        isBack = (nx * (-avgX) + ny * (-avgY) + nz * (-PERSPECTIVE - avgZ)) <= 0;
-      }
-      if (isBack && style === 'solid') continue;
-
-      const lightDot = nx * lv[0] + ny * lv[1] + nz * lv[2];
-      const rec = this._facePool[visibleCount++];
-      rec.indices = fi;
-      rec.intensity = Math.max(0.28, Math.min(1.0, 0.42 + 0.58 * lightDot));
-      rec.avgZ = avgZ;
-      rec.isBackface = isBack;
-    }
-
-    const vis = this._facePool.slice(0, visibleCount);
-    vis.sort((a, b) => b.avgZ - a.avgZ);
-
-    const colorData = poly.getColorData(colorName);
-    const baseEdgeW = poly.edgeNeonWidth !== undefined ? poly.edgeNeonWidth : 4.8;
-    const shapeLineMult = (colorName === 'purple') ? (poly.lineMultiplierEarth || 1.4) : 1.0;
-    const edgeW = baseEdgeW * shapeLineMult * refToSlotPx;
-    const glass = poly.glassiness !== undefined ? poly.glassiness : 0.50;
-    const faceR = isEther ? 10 : colorData.r, faceG = isEther ? 10 : colorData.g, faceB = isEther ? 16 : colorData.b;
-    const edgeR = isEther ? 255 : colorData.r, edgeG = isEther ? 255 : colorData.g, edgeB = isEther ? 255 : colorData.b;
-
-    const emitFace = (face) => {
-      const ind = face.indices, I = face.intensity;
-      if (style === 'wireframe') {
-        const fa = face.isBackface ? (isEther ? 0.14 : 0.08) : ((isEther ? 0.35 : 0.22) + I * (isEther ? 0.20 : 0.15));
-        this._emitFacePoly(ind, faceR, faceG, faceB, fa);
-        if (face.isBackface) {
-          this._emitFaceEdges(ind, edgeW * 0.4, 1.1, edgeR, edgeG, edgeB, 0.30);
-        } else {
-          this._emitFaceEdges(ind, edgeW * 0.8, 1.15, Math.min(255, edgeR + 60), Math.min(255, edgeG + 60), Math.min(255, edgeB + 60), 0.90);
-        }
-      } else if (style === 'solid') {
-        const cr = isEther ? Math.round(8 + I * 18) : Math.min(255, Math.round(faceR * (0.45 + I * 0.55)));
-        const cg = isEther ? Math.round(8 + I * 18) : Math.min(255, Math.round(faceG * (0.45 + I * 0.55)));
-        const cb = isEther ? Math.round(12 + I * 20) : Math.min(255, Math.round(faceB * (0.45 + I * 0.55)));
-        this._emitFacePoly(ind, cr, cg, cb, 1.0);
-        if (isEther) this._emitFaceEdges(ind, edgeW * 0.6, 1.1, 255, 255, 255, 0.90);
-        else this._emitFaceEdges(ind, edgeW * 0.6, 1.1, 15, 23, 42, 0.70);
-      } else if (face.isBackface) {
-        const ba = isEther ? Math.max(0.18, glass * 0.55) : Math.max(0.04, glass * 0.30);
-        const cr = isEther ? faceR : Math.min(255, Math.round(faceR * 0.45));
-        const cg = isEther ? faceG : Math.min(255, Math.round(faceG * 0.45));
-        const cb = isEther ? faceB : Math.min(255, Math.round(faceB * 0.45));
-        this._emitFacePoly(ind, cr, cg, cb, ba);
-        this._emitFaceEdges(ind, Math.max(0.5, edgeW * 0.5), 1.1, edgeR, edgeG, edgeB, 0.32);
+      // Keep every offscreen canvas under GPU MAX_TEXTURE_SIZE with zero frame/resolution loss
+      const maxTex = global.CosmicDomainWarp?.maxTextureSize || 8192;
+      const needSplit = (30 * this.frameSize > maxTex) || (24 * this.frameSize > maxTex);
+      if (needSplit) {
+        this.sheetsPerColor = 2;
+        this.framesPerSheet = 360;
+        this.cols = 20;
+        this.rows = 18;
       } else {
-        const fa = isEther ? Math.min(0.92, glass * 1.35) : glass;
-        const cr = isEther ? faceR : Math.min(255, Math.round(faceR * (0.35 + I * 0.65)));
-        const cg = isEther ? faceG : Math.min(255, Math.round(faceG * (0.35 + I * 0.65)));
-        const cb = isEther ? faceB : Math.min(255, Math.round(faceB * (0.35 + I * 0.65)));
-        this._emitFacePoly(ind, cr, cg, cb, fa);
-        if (I > 0.78) {
-          this._emitFacePoly(ind, 255, 255, 255, Math.min(1.0, (I - 0.78) * (isEther ? 0.65 : 3.2)));
-        }
-        const outerW = edgeW * 1.2;
-        this._emitFaceEdges(ind, outerW, Math.max(1.2, outerW * 0.45), edgeR, edgeG, edgeB, 0.45);
-        this._emitFaceEdges(ind, Math.max(0.55, edgeW * 0.55), 1.05, Math.min(255, edgeR + 90), Math.min(255, edgeG + 90), Math.min(255, edgeB + 90), 0.92);
+        this.sheetsPerColor = 1;
+        this.framesPerSheet = 720;
+        this.cols = 30;
+        this.rows = 24;
       }
-    };
 
-    const emitEtherOrb = (face) => {
-      const i0 = face.indices[0], i1 = face.indices[1], i2 = face.indices[2];
-      const fx = (this._rotX[i0] + this._rotX[i1] + this._rotX[i2]) / 3;
-      const fy = (this._rotY[i0] + this._rotY[i1] + this._rotY[i2]) / 3;
-      const fz = (this._rotZ[i0] + this._rotZ[i1] + this._rotZ[i2]) / 3;
-      const hoverMult = 0.70 / (Math.hypot(fx, fy, fz) || 1);
-      const hz = fz * hoverMult;
-      const hScale = PERSPECTIVE / (PERSPECTIVE + hz);
-      const px = slotCenterX + (fx * hoverMult) * polyRadiusPx * hScale;
-      const py = slotCenterY + (fy * hoverMult) * polyRadiusPx * hScale;
-      const nr = Math.max(1.2, 12.0 * refToSlotPx);
-      const vc = poly.getColorData(ETHER_FACE_COLORS[((6 - i0 - i1 - i2) % 4 + 4) % 4]);
-      this._emitDisc(px, py, nr * 1.28, 1.3, vc.r, vc.g, vc.b, 0.38);
-      this._emitDisc(px, py, nr, 1.1, Math.min(255, vc.r + 35), Math.min(255, vc.g + 35), Math.min(255, vc.b + 35), 0.95);
-      this._emitDisc(px, py, nr * 0.50, 1.0, 255, 255, 255, 0.60);
-      this._emitDisc(px, py, Math.max(0.4, nr * 0.28), 0.9, 255, 255, 255, 1.0);
-    };
+      this.frameSheetIdx = new Uint8Array(this.frameCount);
+      this.frameSX = new Int16Array(this.frameCount);
+      this.frameSY = new Int16Array(this.frameCount);
+      this.initLUT();
+    }
 
-    if (isEther && numVerts === 4) {
-      if (style === 'gem' || style === 'wireframe') {
-        for (let f = 0; f < visibleCount; f++) if (vis[f].isBackface) emitEtherOrb(vis[f]);
+    initLUT() {
+      const fSize = this.frameSize;
+      const cols = this.cols;
+      const perSheet = this.framesPerSheet;
+      for (let k = 0; k < this.frameCount; k++) {
+        this.frameSheetIdx[k] = Math.floor(k / perSheet);
+        const localK = k % perSheet;
+        this.frameSX[k] = (localK % cols) * fSize;
+        this.frameSY[k] = Math.floor(localK / cols) * fSize;
       }
-      for (let f = 0; f < visibleCount; f++) if (vis[f].isBackface) emitFace(vis[f]);
-      for (let f = 0; f < visibleCount; f++) {
-        if (!vis[f].isBackface) {
-          emitFace(vis[f]);
-          if (style === 'gem' || style === 'wireframe') emitEtherOrb(vis[f]);
+    }
+
+    init(polyRender, opts = null) {
+      this.polyRender = polyRender;
+      if (polyRender) {
+        polyRender.loopCache = this;
+      }
+      this._configureLayout();
+      if (opts && (opts.timeSliced || opts.async)) {
+        return this.bakeAllAsync(opts);
+      }
+      this.bakeAll();
+      return this;
+    }
+
+    invalidate() {
+      this._bakeToken++;
+      this.dirty = true;
+    }
+
+    _ensureColorSheets(colorName) {
+      const sheetW = this.cols * this.frameSize;
+      const sheetH = this.rows * this.frameSize;
+      const count = this.sheetsPerColor;
+      let arr = this.sheets[colorName];
+      const valid = Array.isArray(arr) && arr.length === count
+        && arr.every(s => s?.canvas && s.ctx && s.canvas.width === sheetW && s.canvas.height === sheetH);
+      if (!valid) {
+        arr = [];
+        for (let i = 0; i < count; i++) {
+          const canvas = document.createElement('canvas');
+          canvas.width = sheetW;
+          canvas.height = sheetH;
+          const sCtx = canvas.getContext('2d', { alpha: true });
+          if (!sCtx) {
+            this.enabled = false;
+            this.sheets = {};
+            return null;
+          }
+          arr.push({ canvas, ctx: sCtx });
+        }
+        this.sheets[colorName] = arr;
+      }
+      for (let i = 0; i < arr.length; i++) {
+        arr[i].ctx.clearRect(0, 0, sheetW, sheetH);
+      }
+      return arr;
+    }
+
+    _renderFrame(poly, model, style, colorName, sheetsArr, k) {
+      const fSize = this.frameSize;
+      const half = fSize * 0.5;
+      const polyR = this.baseRadius * (colorName === 'ether' ? 0.77 : 0.80);
+      const tau = k / this.frameCount;
+      const theta = tau * Math.PI * 2;
+      const sObj = sheetsArr[this.frameSheetIdx[k]];
+      poly.renderProjectedPolyhedron(
+        sObj.ctx, this.frameSX[k] + half, this.frameSY[k] + half,
+        polyR, model, 2 * theta, 3 * theta, theta, colorName, style, false, 1.0
+      );
+    }
+
+    bakeColor(colorName) {
+      if (!this.polyRender || !this.enabled) return null;
+      const poly = this.polyRender;
+      const modelKey = poly.POLYHEDRON_MAP[colorName];
+      if (!modelKey || !poly.models[modelKey]) return null;
+      const model = poly.models[modelKey];
+      const style = poly.overrideStyle || 'gem';
+      const sheetsArr = this._ensureColorSheets(colorName);
+      if (!sheetsArr) return null;
+
+      try {
+        for (let k = 0; k < this.frameCount; k++) {
+          this._renderFrame(poly, model, style, colorName, sheetsArr, k);
+        }
+      } catch (_) {
+        this.enabled = false;
+        this.sheets = {};
+        return null;
+      }
+      return sheetsArr;
+    }
+
+    bakeAll() {
+      if (!this.polyRender || !this.enabled) return;
+      for (let i = 0; i < this.COLORS.length; i++) {
+        if (!this.bakeColor(this.COLORS[i])) {
+          this.enabled = false;
+          this.sheets = {};
+          return;
         }
       }
-    } else {
-      for (let f = 0; f < visibleCount; f++) emitFace(vis[f]);
-      if (style === 'gem' || style === 'wireframe') {
-        const baseNodeR = Math.max(0.8, Math.min(2.5, (baseEdgeW * shapeLineMult) * 0.6));
-        const nodeR = Math.max(0.55, baseNodeR * refToSlotPx);
-        const vr = Math.min(255, colorData.r + 75), vg = Math.min(255, colorData.g + 75), vb = Math.min(255, colorData.b + 75);
-        for (let i = 0; i < numVerts; i++) {
-          if (this._rotZ[i] <= 0.15 || style === 'wireframe') {
-            this._emitDisc(this._projX[i], this._projY[i], nodeR, 1.05, vr, vg, vb, 0.92);
-            this._emitDisc(this._projX[i], this._projY[i], Math.max(0.35, nodeR * 0.42), 0.9, 255, 255, 255, 0.95);
+      this.dirty = false;
+    }
+
+    /**
+     * Frame-budgeted async sprite-sheet baker: yields requestAnimationFrame between
+     * ~6.5 ms slices so live WebGL + 60 Hz UI never stall or clog the GPU command queue.
+     */
+    async bakeAllAsync(opts = {}) {
+      if (!this.polyRender || !this.enabled) return this;
+      const token = ++this._bakeToken;
+      const poly = this.polyRender;
+      const style = poly.overrideStyle || 'gem';
+      const budgetMs = Math.max(2, Number(opts.frameBudgetMs) || 6.5);
+      const totalFrames = this.COLORS.length * this.frameCount;
+      const yieldFrame = () => (typeof requestAnimationFrame === 'function'
+        ? new Promise((r) => requestAnimationFrame(r))
+        : new Promise((r) => setTimeout(r, 0)));
+
+      let baked = 0;
+      let sliceStart = performance.now();
+
+      for (let c = 0; c < this.COLORS.length; c++) {
+        if (token !== this._bakeToken || !this.enabled) return this;
+        const colorName = this.COLORS[c];
+        const modelKey = poly.POLYHEDRON_MAP[colorName];
+        const model = modelKey ? poly.models[modelKey] : null;
+        if (!model) { baked += this.frameCount; continue; }
+
+        const sheetsArr = this._ensureColorSheets(colorName);
+        if (!sheetsArr) return this;
+
+        for (let k = 0; k < this.frameCount; k++) {
+          if (token !== this._bakeToken || !this.enabled) return this;
+          try {
+            this._renderFrame(poly, model, style, colorName, sheetsArr, k);
+          } catch (_) {
+            this.enabled = false;
+            this.sheets = {};
+            return this;
+          }
+          baked++;
+          if ((k & 3) === 3 && (performance.now() - sliceStart) >= budgetMs) {
+            if (typeof opts.onProgress === 'function') opts.onProgress(baked, totalFrames);
+            await yieldFrame();
+            sliceStart = performance.now();
           }
         }
+        if (typeof opts.onProgress === 'function') opts.onProgress(baked, totalFrames);
+        await yieldFrame();
+        sliceStart = performance.now();
       }
+
+      if (token === this._bakeToken) this.dirty = false;
+      return this;
     }
-    return true;
-  };
 
-  proto._resolveSeeds = function(cx, cy, seedPhase, seedTilt) {
-    if (seedPhase === null || seedPhase === undefined) {
-      const s1 = Math.abs(Math.sin(cx * 12.9898 + cy * 78.233) * 43758.5453);
-      seedPhase = s1 - Math.floor(s1);
-    }
-    if (seedTilt === null || seedTilt === undefined) {
-      const s2 = Math.abs(Math.cos(cx * 39.346 + cy * 11.135) * 24634.6345);
-      seedTilt = s2 - Math.floor(s2);
-    }
-    return { seedPhase, seedTilt };
-  };
-
-  proto._pickSlotSize = function(maxDestDiamPx) {
-    const isLite = !!global.DevicePerfProfile?.isLiteMode?.();
-    if (maxDestDiamPx <= (isLite ? 80 : 62)) return 64;
-    if (maxDestDiamPx <= (isLite ? 160 : 124)) return 128;
-    return 256;
-  };
-
-  proto.draw = function(ctx, cx, cy, radius, colorName, time = 0, customAlpha = null, seedPhase = null, seedTilt = null) {
-    if (!this.enabled || !this.polyRender || radius <= 0.05) return false;
-    if (!this.gl && !this._initWebGL()) return false;
-    if (!this.gl || this.contextLost || this.gl.isContextLost?.()) return false;
-
-    const t = ctx.getTransform();
-    const dprScale = Math.max(0.5, Math.hypot(t.a, t.b));
-    const destHalf = radius * SLOT_RADIUS_PAD;
-    const destSize = destHalf * 2.0;
-    const slotSize = this._pickSlotSize(destSize * dprScale);
-    const innerSize = slotSize - 2;
-    const seeds = this._resolveSeeds(cx, cy, seedPhase, seedTilt);
-
-    const gl = this.gl;
-    gl.useProgram(this.program);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
-    gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, CANVAS_SIZE - slotSize, slotSize, slotSize);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.disable(gl.SCISSOR_TEST);
-
-    this._vCount = 0;
-    if (!this._emitCrystalToSlot(slotSize * 0.5, slotSize * 0.5, innerSize, colorName, time, seeds.seedPhase, seeds.seedTilt)) {
-      return false;
-    }
-    this._flushVbo();
-
-    ctx.save();
-    if (customAlpha !== null && customAlpha !== undefined) {
-      ctx.globalAlpha = (ctx.globalAlpha ?? 1.0) * customAlpha;
-    }
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(this.canvas, 1, 1, innerSize, innerSize, cx - destHalf, cy - destHalf, destSize, destSize);
-    ctx.restore();
-    return true;
-  };
-
-  proto.drawBatch = function(ctx, items, time = 0) {
-    if (!this.enabled || !this.polyRender || !items || items.length === 0) return false;
-    if (!this.gl && !this._initWebGL()) return false;
-    if (!this.gl || this.contextLost || this.gl.isContextLost?.()) return false;
-
-    const baseTransform = ctx.getTransform();
-    const baseAlpha = ctx.globalAlpha !== undefined ? ctx.globalAlpha : 1.0;
-    const dprScale = Math.max(0.5, Math.hypot(baseTransform.a, baseTransform.b));
-
-    let maxR = 0;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].radius > maxR) maxR = items[i].radius;
-    }
-    if (maxR <= 0.05) return true;
-
-    const slotSize = this._pickSlotSize(maxR * SLOT_RADIUS_PAD * 2.0 * dprScale);
-    const innerSize = slotSize - 2;
-    const cols = Math.floor(CANVAS_SIZE / slotSize);
-    const slotsPerPass = cols * cols;
-    const gl = this.gl;
-
-    gl.useProgram(this.program);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
-
-    ctx.save();
-    ctx.setTransform(baseTransform);
-    ctx.imageSmoothingEnabled = true;
-
-    for (let start = 0; start < items.length; start += slotsPerPass) {
-      const end = Math.min(items.length, start + slotsPerPass);
-      const count = end - start;
-      const usedRows = Math.ceil(count / cols);
-      const clearH = usedRows * slotSize;
-
-      gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(0, CANVAS_SIZE - clearH, CANVAS_SIZE, clearH);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.disable(gl.SCISSOR_TEST);
-
-      this._vCount = 0;
-      for (let k = 0; k < count; k++) {
-        const it = items[start + k];
-        if (it.radius <= 0.05) continue;
-        const col = k % cols;
-        const row = Math.floor(k / cols);
-        const scx = col * slotSize + slotSize * 0.5;
-        const scy = row * slotSize + slotSize * 0.5;
-        const seeds = this._resolveSeeds(it.cx, it.cy, it.seedPhase, it.seedTilt);
-        this._emitCrystalToSlot(scx, scy, innerSize, it.colorName, time, seeds.seedPhase, seeds.seedTilt);
+    getSheet(colorName) {
+      if (this.dirty) {
+        this.bakeAll();
       }
-      this._flushVbo();
-
-      for (let k = 0; k < count; k++) {
-        const it = items[start + k];
-        if (it.radius <= 0.05) continue;
-        const col = k % cols;
-        const row = Math.floor(k / cols);
-        const sx = col * slotSize + 1;
-        const sy = row * slotSize + 1;
-        const destHalf = it.radius * SLOT_RADIUS_PAD;
-        const destSize = destHalf * 2.0;
-        ctx.globalAlpha = (it.customAlpha !== null && it.customAlpha !== undefined)
-          ? (baseAlpha * it.customAlpha)
-          : baseAlpha;
-        ctx.drawImage(this.canvas, sx, sy, innerSize, innerSize, it.cx - destHalf, it.cy - destHalf, destSize, destSize);
+      let sheetsArr = this.sheets[colorName];
+      if (!sheetsArr) {
+        sheetsArr = this.bakeColor(colorName);
       }
+      return sheetsArr;
     }
 
-    ctx.globalAlpha = baseAlpha;
-    ctx.restore();
-    return true;
-  };
+    /**
+     * Fast GPU-accelerated Blit for all polyhedra (micro sockets, hero crystals, hubs).
+     */
+    draw(ctx, cx, cy, radius, colorName, time = 0, customAlpha = null, seedPhase = null, seedTilt = null) {
+      if (!this.enabled) return false;
 
-  proto.getVramAllocMB = function() {
-    if (!this.gl || !this.canvas || this.contextLost) return 0;
-    const fbBytes = this.canvas.width * this.canvas.height * 4;
-    const vboBytes = this._vData.byteLength;
-    return (fbBytes + vboBytes) / (1024 * 1024);
-  };
+      const sheetsArr = this.getSheet(colorName);
+      if (!sheetsArr || !sheetsArr.length) return false;
 
-  const instance = new Cls();
+      // Camera-invariant deterministic pseudo-random seeds if not explicitly supplied
+      if (seedPhase === null || seedPhase === undefined || seedTilt === null || seedTilt === undefined) {
+        const s1 = Math.abs(Math.sin(cx * 12.9898 + cy * 78.233) * 43758.5453);
+        if (seedPhase === null || seedPhase === undefined) {
+          seedPhase = s1 - Math.floor(s1);
+        }
+        const s2 = Math.abs(Math.cos(cx * 39.346 + cy * 11.135) * 24634.6345);
+        if (seedTilt === null || seedTilt === undefined) {
+          seedTilt = s2 - Math.floor(s2);
+        }
+      }
+
+      // 1. Random #1: Staggered time/phase offset along the 6-second harmonic loop
+      const progress = ((time / this.duration) + seedPhase) % 1.0;
+      const normProgress = progress < 0 ? progress + 1.0 : progress;
+      const frameIndex = Math.floor(normProgress * this.frameCount) % this.frameCount;
+
+      // 2. Random #2: Fixed 2D spatial tilt angle (-PI to +PI)
+      const tiltAngle = (seedTilt * 2.0 - 1.0) * Math.PI;
+
+      const fSize = this.frameSize;
+      const scale = radius / this.baseRadius;
+      const destSize = fSize * scale;
+      const halfDest = destSize * 0.5;
+
+      // Frame coordinate Lookup Table (LUT) - Fix 3
+      const sObj = sheetsArr[this.frameSheetIdx[frameIndex]] || sheetsArr[0];
+      if (!sObj?.canvas) return false;
+      const sx = this.frameSX[frameIndex];
+      const sy = this.frameSY[frameIndex];
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      if (customAlpha !== null && customAlpha !== undefined) {
+        ctx.globalAlpha = (ctx.globalAlpha || 1.0) * customAlpha;
+      }
+      ctx.rotate(tiltAngle);
+      ctx.imageSmoothingEnabled = true;
+
+      ctx.drawImage(
+        sObj.canvas,
+        sx, sy, fSize, fSize,
+        -halfDest, -halfDest, destSize, destSize
+      );
+
+      ctx.restore();
+      return true;
+    }
+
+    /**
+     * High-speed batched stamp rendering:
+     * - Uses single ctx.save() and ctx.restore() for the entire batch.
+     * - Groups crystals by color sheet to eliminate atlas texture switching.
+     * - Uses ctx.setTransform(baseTransform) instead of per-item save/restore state churn.
+     */
+    drawBatch(ctx, items, time = 0) {
+      if (!this.enabled || !items || items.length === 0) return false;
+
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+
+      const baseTransform = ctx.getTransform();
+      const baseAlpha = ctx.globalAlpha !== undefined ? ctx.globalAlpha : 1.0;
+
+      // Group items by color
+      const groups = {};
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const c = it.colorName;
+        if (!groups[c]) groups[c] = [];
+        groups[c].push(it);
+      }
+
+      const fSize = this.frameSize;
+      const bRad = this.baseRadius;
+      const duration = this.duration;
+      const invDuration = 1.0 / duration;
+      const fCount = this.frameCount;
+      let prevRadius = -1, destSize = 0, halfDest = 0;
+
+      for (const colorName in groups) {
+        const sheetsArr = this.getSheet(colorName);
+        if (!sheetsArr || !sheetsArr.length) continue;
+
+        const group = groups[colorName];
+        for (let j = 0; j < group.length; j++) {
+          const it = group[j];
+          let sPhase = it.seedPhase;
+          let sTilt = it.seedTilt;
+
+          if (sPhase === null || sPhase === undefined || sTilt === null || sTilt === undefined) {
+            const s1 = Math.abs(Math.sin(it.cx * 12.9898 + it.cy * 78.233) * 43758.5453);
+            if (sPhase === null || sPhase === undefined) sPhase = s1 - Math.floor(s1);
+            const s2 = Math.abs(Math.cos(it.cx * 39.346 + it.cy * 11.135) * 24634.6345);
+            if (sTilt === null || sTilt === undefined) sTilt = s2 - Math.floor(s2);
+          }
+
+          const progress = (time * invDuration + sPhase) % 1.0;
+          const normProgress = progress < 0 ? progress + 1.0 : progress;
+          const frameIndex = Math.floor(normProgress * fCount) % fCount;
+          const tiltAngle = (sTilt * 2.0 - 1.0) * Math.PI;
+
+          // Scale calculated once per batch / when radius changes - Fix 4
+          if (it.radius !== prevRadius) {
+            prevRadius = it.radius;
+            destSize = fSize * (it.radius / bRad);
+            halfDest = destSize * 0.5;
+          }
+
+          // Frame coordinate Lookup Table (LUT) - Fix 3
+          const sObj = sheetsArr[this.frameSheetIdx[frameIndex]] || sheetsArr[0];
+          if (!sObj?.canvas) continue;
+          const sx = this.frameSX[frameIndex];
+          const sy = this.frameSY[frameIndex];
+
+          ctx.setTransform(baseTransform);
+          ctx.translate(it.cx, it.cy);
+          if (it.customAlpha !== null && it.customAlpha !== undefined) {
+            ctx.globalAlpha = baseAlpha * it.customAlpha;
+          } else {
+            ctx.globalAlpha = baseAlpha;
+          }
+          ctx.rotate(tiltAngle);
+
+          ctx.drawImage(
+            sObj.canvas,
+            sx, sy, fSize, fSize,
+            -halfDest, -halfDest, destSize, destSize
+          );
+        }
+      }
+
+      ctx.setTransform(baseTransform);
+      ctx.globalAlpha = baseAlpha;
+      ctx.restore();
+      return true;
+    }
+
+    getVramAllocMB() {
+      let totalBytes = 0;
+      for (const cKey in this.sheets) {
+        const arr = this.sheets[cKey];
+        if (!Array.isArray(arr)) continue;
+        for (let i = 0; i < arr.length; i++) {
+          const c = arr[i]?.canvas;
+          if (c) totalBytes += c.width * c.height * 4;
+        }
+      }
+      return totalBytes / (1024 * 1024);
+    }
+  }
+
+  const instance = new PolyhedronLoopCacheClass();
   global.PolyhedronLoopCache = instance;
   if (global.ROLL_CALL && typeof global.ROLL_CALL.set === 'function') {
     global.ROLL_CALL.set('Polyhedron_Loop_Cache', instance);

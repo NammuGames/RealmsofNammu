@@ -7,32 +7,6 @@
 (function(global) {
   'use strict';
 
-  const isTouchOrSmall = () => (typeof window !== 'undefined') && (
-    window.matchMedia?.('(pointer: coarse)')?.matches || Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560
-  );
-  const perfOverride = (() => {
-    try { const p = new URLSearchParams(global.location?.search || '').get('perf'); return (p === 'lite' || p === 'full') ? p : null; }
-    catch (_) { return null; }
-  })();
-  const perfProfile = global.DevicePerfProfile || {
-    override: perfOverride, maxTextureSize: 8192, isSoftwareGpu: false, contextLostCount: 0,
-    runtimeDowngraded: false, webglFailed: false, listeners: [],
-    deviceMemory: (typeof navigator !== 'undefined' && navigator.deviceMemory) || 8,
-    hardwareConcurrency: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 8,
-    onChange(fn) { if (typeof fn === 'function') this.listeners.push(fn); },
-    _emit() { this.listeners.forEach(fn => { try { fn(this.isLiteMode()); } catch (_) {} }); },
-    markRuntimeDowngrade() { if (!this.runtimeDowngraded) { this.runtimeDowngraded = true; this._emit(); } },
-    markContextLost() { this.contextLostCount++; this._emit(); },
-    isLiteMode() {
-      if (this.override === 'lite') return true;
-      if (this.override === 'full') return false;
-      if (isTouchOrSmall() || this.webglFailed || this.contextLostCount > 0 || this.runtimeDowngraded || this.isSoftwareGpu) return true;
-      if (this.maxTextureSize > 0 && this.maxTextureSize <= 4096) return true;
-      return this.deviceMemory <= 4 || this.hardwareConcurrency <= 4;
-    }
-  };
-  global.DevicePerfProfile = perfProfile;
-
   class CosmicDomainWarpClass {
     constructor() {
       this.gl = null;
@@ -44,6 +18,7 @@
       this.uniforms = {};
       this.initialized = false;
       this.contextLost = false;
+      this.maxTextureSize = 8192;
       this._ctxEventsBound = false;
     }
 
@@ -55,20 +30,19 @@
       this.canvas = canvas;
       if (!this._ctxEventsBound) {
         this._ctxEventsBound = true;
-        canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.contextLost = true; perfProfile.markContextLost(); }, false);
+        canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.contextLost = true; }, false);
         canvas.addEventListener('webglcontextrestored', () => { this.contextLost = false; this.initialized = false; this.init(canvas); }, false);
       }
+      const isMobile = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches || Math.min(window.innerWidth, window.innerHeight) <= 560);
       const glOpts = {
         alpha: false,
         depth: false,
         antialias: false,
-        powerPreference: perfProfile.isLiteMode() ? 'default' : 'high-performance'
+        powerPreference: isMobile ? 'default' : 'high-performance'
       };
       this.gl = canvas.getContext('webgl2', glOpts) || canvas.getContext('webgl', glOpts);
 
       if (!this.gl) {
-        perfProfile.webglFailed = true;
-        perfProfile._emit();
         console.warn('CosmicDomainWarp: WebGL not supported on this context.');
         return false;
       }
@@ -76,10 +50,7 @@
       const gl = this.gl;
       this.contextLost = !!gl.isContextLost?.();
       try {
-        perfProfile.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 8192;
-        const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-        const rStr = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '') : '';
-        perfProfile.isSoftwareGpu = /swiftshader|llvmpipe|softpipe|mesa offscreen|microsoft basic render/i.test(rStr);
+        this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 8192;
       } catch (_) {}
       this.isWebGL2 = (typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext);
 

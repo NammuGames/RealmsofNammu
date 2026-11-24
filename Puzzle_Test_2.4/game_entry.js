@@ -89,7 +89,6 @@
     'cells/Input_Controller.js',
     'cells/Polyhedron_Models.js',
     'cells/Polyhedron_Renderer.js',
-    'cells/Polyhedron_Loop_Cache_1.0.js',
     'cells/Polyhedron_Loop_Cache.js',
     'cells/hex_ui/Sigil_Emblem_Renderer_1.0.js',
     'cells/hex_ui/Sigil_Emblem_Renderer_1.1.js',
@@ -228,7 +227,7 @@
       const yieldFrame = () => (typeof requestAnimationFrame === 'function'
         ? new Promise((r) => requestAnimationFrame(r))
         : Promise.resolve());
-      const reportMountStep = async (step, total = 6) => {
+      const reportMountStep = async (step, total = 100) => {
         if (typeof opts?.onMountProgress === 'function') opts.onMountProgress(step, total);
         if (timeSliced) await yieldFrame();
       };
@@ -236,7 +235,7 @@
       if (!_puzzleMountedOnce) {
         if (boardRenderer) boardRenderer.mount(engine);
         if (inputController && dom.canvasBoard) inputController.init(dom.canvasBoard);
-        await reportMountStep(1, 6);
+        await reportMountStep(5, 100);
 
         if (studio) studio.init(engine);
         if (compCanvas) compCanvas.init(engine);
@@ -256,24 +255,38 @@
           global.ACTIVE_FONT_FAMILY = '"Sci-Fae", "SciFaePseudoScript10", "Orbitron", sans-serif';
         }
         if (global.SigilNookCanvas) global.SigilNookCanvas.init(engine);
-        await reportMountStep(2, 6);
+        await reportMountStep(10, 100);
 
         if (statPod) statPod.init(engine);
         if (global.StatCanvas) global.StatCanvas.init(engine);
         if (global.RoomStatCanvas) global.RoomStatCanvas.init(engine);
-        await reportMountStep(3, 6);
+        await reportMountStep(15, 100);
 
         if (deckSync) deckSync.initBridge();
         if (sidebarDeck) sidebarDeck.init(engine, state, audio);
         if (deckSync) deckSync.syncNativeStatPodWithGameState();
-        await reportMountStep(4, 6);
+        await reportMountStep(20, 100);
 
         if (polyRender) {
           polyRender.vibrancy = state.polyVibrancy;
           polyRender.glassiness = state.polyGlassiness;
           polyRender.edgeNeonWidth = state.polyEdgeWidth;
           polyRender.lineMultiplierEarth = state.lineMultiplierEarth;
-          if (global.PolyhedronLoopCache) global.PolyhedronLoopCache.init(polyRender);
+          if (global.PolyhedronLoopCache) {
+            if (timeSliced && typeof global.PolyhedronLoopCache.bakeAllAsync === 'function') {
+              await global.PolyhedronLoopCache.init(polyRender, {
+                timeSliced: true,
+                frameBudgetMs: 6.5,
+                onProgress: (done, total) => {
+                  if (typeof opts?.onMountProgress === 'function') {
+                    opts.onMountProgress(20 + (done / Math.max(1, total)) * 74, 100);
+                  }
+                }
+              });
+            } else {
+              global.PolyhedronLoopCache.init(polyRender);
+            }
+          }
         }
         if (global.SigilEmblemRenderer) {
           global.SigilEmblemRenderer.vibrancy = state.pyramidVibrancy;
@@ -281,7 +294,7 @@
         if (global.SigilResolver && global.GameState) {
           global.SigilResolver.evaluateSigils(global.GameState.board);
         }
-        await reportMountStep(5, 6);
+        await reportMountStep(95, 100);
 
         // Wire Puzzle-specific Tuning Labs inside the persistent HTML Tuning Drawer
         if (global.BorderTuningLab) global.BorderTuningLab.init(dom, audio);
@@ -337,7 +350,7 @@
         engine._podFadeAlpha = 0;
         engine._podsTargetHidden = true;
       }
-      await reportMountStep(6, 6);
+      await reportMountStep(100, 100);
     },
 
     unmount(ctx = {}) {

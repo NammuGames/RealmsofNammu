@@ -167,25 +167,20 @@
 
       // 3. LAYER 3: UNPLACED COMPONENTS (Enlarged floating polyhedra, 1.0 alpha)
       if (global.PolyhedronRenderer) {
-        const weaveBatch = [];
         placedTiles.forEach(pt => {
           const scr = math.hexToScreen(pt.q, pt.r, originX, originY, hexRadius);
           const sp = (Math.abs(Math.sin(pt.q * 12.9898 + pt.r * 78.233) * 43758.5453)) % 1.0;
           const st = (Math.abs(Math.cos(pt.q * 39.346 + pt.r * 11.135) * 24634.6345)) % 1.0;
-          weaveBatch.push({ cx: scr.x, cy: scr.y, radius: hexRadius * unplacedScale * matScale, colorName: pt.color, customAlpha: 1.0, seedPhase: sp, seedTilt: st });
+          global.PolyhedronRenderer.drawComponent(ctx, scr.x, scr.y, hexRadius * unplacedScale * matScale, pt.color, elapsedTime, false, false, 1.0, sp, st);
         });
         if (placedTiles.length < 4) {
           const colorName = activeMat.colors[currentStep] || activeMat.colors[0];
-          const curScale = global.BoardRippleRenderer?.getMaterialAnimScale ? global.BoardRippleRenderer.getMaterialAnimScale() : 1.0;
-          if (curScale > 0.001) {
+          const matScale = global.BoardRippleRenderer?.getMaterialAnimScale ? global.BoardRippleRenderer.getMaterialAnimScale() : 1.0;
+          if (matScale > 0.001) {
             const sp = (Math.abs(Math.sin(cursor.q * 12.9898 + cursor.r * 78.233) * 43758.5453)) % 1.0;
             const st = (Math.abs(Math.cos(cursor.q * 39.346 + cursor.r * 11.135) * 24634.6345)) % 1.0;
-            weaveBatch.push({ cx: cursorScr.x, cy: cursorScr.y, radius: hexRadius * unplacedScale * curScale, colorName, customAlpha: 1.0, seedPhase: sp, seedTilt: st });
+            global.PolyhedronRenderer.drawComponent(ctx, cursorScr.x, cursorScr.y, hexRadius * unplacedScale * matScale, colorName, elapsedTime, false, false, 1.0, sp, st);
           }
-        }
-        if (weaveBatch.length > 0) {
-          if (typeof global.PolyhedronRenderer.drawBatch === 'function') global.PolyhedronRenderer.drawBatch(ctx, weaveBatch, elapsedTime);
-          else weaveBatch.forEach(it => global.PolyhedronRenderer.drawComponent(ctx, it.cx, it.cy, it.radius, it.colorName, elapsedTime, false, false, 1.0, it.seedPhase, it.seedTilt));
         }
       }
     }
@@ -198,11 +193,6 @@
 
       const matScale = global.BoardRippleRenderer?.getMaterialAnimScale ? global.BoardRippleRenderer.getMaterialAnimScale() : 1.0;
       if (matScale <= 0.001) return;
-
-      const scaledEffR = effR * matScale;
-      const scaledCompR = gCompR * matScale;
-      const ghostBatch = [];
-      const outsideOverlays = [];
 
       activeMat.activeCoords.forEach(([dq, dr], idx) => {
         const tq = cursor.q + dq;
@@ -217,28 +207,30 @@
         const seedPhase = (Math.abs(Math.sin(tq * 12.9898 + tr * 78.233) * 43758.5453)) % 1.0;
         const seedTilt = (Math.abs(Math.cos(tq * 39.346 + tr * 11.135) * 24634.6345)) % 1.0;
 
+        ctx.save();
         let backCol = '#22c55e';
         if (state.activeMaterialMod === 'phase') backCol = '#2563eb';
         else if (state.activeMaterialMod === 'burn') backCol = '#ef4444';
         else if (isOccupied) backCol = '#f97316';
         else if (state.activeMaterialMod === 'fortify') backCol = '#c084fc';
 
+        const scaledEffR = effR * matScale;
+        const scaledCompR = gCompR * matScale;
+
         if (!isInside) {
           drawBezel(x, y, scaledEffR, '#64748b', '#94a3b8', pGreyBg, pGreyBorder);
-          outsideOverlays.push({ x, y });
+          if (global.PolyhedronRenderer) {
+            global.PolyhedronRenderer.drawComponent(ctx, x, y, scaledCompR, cName, elapsedTime, false, false, 1.0, seedPhase, seedTilt);
+          }
+          drawBezel(x, y, scaledEffR, '#64748b', '#94a3b8', pGreyBg, pGreyBorder);
         } else {
           drawBezel(x, y, scaledEffR, backCol, backCol, ghostBgOp, ghostBorderOp);
+          if (global.PolyhedronRenderer) {
+            global.PolyhedronRenderer.drawComponent(ctx, x, y, scaledCompR, cName, elapsedTime, false, false, 1.0, seedPhase, seedTilt);
+          }
         }
-        ghostBatch.push({ cx: x, cy: y, radius: scaledCompR, colorName: cName, customAlpha: 1.0, seedPhase, seedTilt });
+        ctx.restore();
       });
-
-      if (ghostBatch.length > 0 && global.PolyhedronRenderer) {
-        if (typeof global.PolyhedronRenderer.drawBatch === 'function') global.PolyhedronRenderer.drawBatch(ctx, ghostBatch, elapsedTime);
-        else ghostBatch.forEach(it => global.PolyhedronRenderer.drawComponent(ctx, it.cx, it.cy, it.radius, it.colorName, elapsedTime, false, false, 1.0, it.seedPhase, it.seedTilt));
-      }
-      for (let i = 0; i < outsideOverlays.length; i++) {
-        drawBezel(outsideOverlays[i].x, outsideOverlays[i].y, scaledEffR, '#64748b', '#94a3b8', pGreyBg, pGreyBorder);
-      }
     }
   }
 

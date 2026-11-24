@@ -88,7 +88,7 @@
     queue.push(['XDM', SETS.XDM.idx], ['DGS', SETS.DGS.idx], ['GSF', SETS.GSF.idx], ['GDA', SETS.GDA.idx]);
     for (let i = 0; i < 12; i++) queue.push(['PWM', i], ['DGD', i], ['SPM', i]);
     for (let i = 0; i < 12; i++) queue.push(['BGM', i]);
-    const isMobileBake = !!(global.DevicePerfProfile?.isLiteMode?.() || (typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches || Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560)));
+    const isMobileBake = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches || Math.min(window.innerWidth || 999, window.innerHeight || 999) <= 560);
     const step = () => {
       if (!queue.length) return;
       const [id, idx] = queue.shift();

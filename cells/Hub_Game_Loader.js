@@ -218,7 +218,7 @@
 
       const p = (async () => {
         const loaded = await this.preloadGame(id, (done, total) => {
-          emitPct((done / Math.max(1, total)) * 80);
+          emitPct((done / Math.max(1, total)) * 50);
         });
         const entry = global.GAME_ENTRIES?.[id];
         if (!loaded || !entry || typeof entry.mount !== 'function') {
@@ -237,7 +237,7 @@
           preserveOverlay: true,
           timeSliced: true,
           onMountProgress: (step, totalSteps) => {
-            emitPct(80 + (step / Math.max(1, totalSteps)) * 20);
+            emitPct(50 + (step / Math.max(1, totalSteps)) * 50);
           }
         }, opts));
         emitPct(100);

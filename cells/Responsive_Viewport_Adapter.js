@@ -63,7 +63,6 @@
         this._injectStyles();
         this._createRotateOverlay();
         this._bindEvents();
-        global.DevicePerfProfile?.onChange?.(() => this.syncViewport());
         this._initialized = true;
       }
 
@@ -310,8 +309,7 @@
       this.isPortrait = cssH > cssW;
 
       const isCoarseMobile = global.matchMedia?.('(pointer: coarse)')?.matches || Math.min(cssW, cssH) <= 560;
-      const isLitePerf = !!(isCoarseMobile || global.DevicePerfProfile?.isLiteMode?.());
-      const dprCap = isLitePerf ? 1 : MAX_DPR;
+      const dprCap = isCoarseMobile ? 1 : MAX_DPR;
       const dpr = Math.min(dprCap, Math.max(1, global.devicePixelRatio || 1));
       const stageScale = Math.min(cssW / VIRTUAL_BASE_W, cssH / VIRTUAL_BASE_H);
       const virtualW = VIRTUAL_BASE_W;
@@ -338,7 +336,7 @@
         }
       }
       const baseWarpScale = this.state?.warpRenderScale || 0.75;
-      const warpScale = (isLitePerf && baseWarpScale >= 0.7) ? 0.45 : baseWarpScale;
+      const warpScale = (isCoarseMobile && baseWarpScale >= 0.7) ? 0.45 : baseWarpScale;
 
       // Enforce Landscape-Only: never CSS-rotate #canvas-board-overlay sideways
       if (canvasBoard) {

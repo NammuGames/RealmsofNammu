@@ -156,7 +156,6 @@
             }
             ctx.restore();
 
-            const chargeBatch = [];
             for (let sIdx = 0; sIdx < 3; sIdx++) {
               const s = slots[sIdx];
               const filled = isFilled[sIdx];
@@ -183,7 +182,6 @@
                 ctx.lineWidth = 3.0;
                 ctx.globalAlpha = 0.28;
                 ctx.stroke();
-                chargeBatch.push({ cx: s.x, cy: s.y, radius: rSlot * 0.68, colorName: 'orange', customAlpha: 1.0, seedPhase: seed.phase, seedTilt: seed.tilt });
               } else {
                 ctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
                 ctx.lineWidth = 1.1;
@@ -195,10 +193,11 @@
                 ctx.fill();
               }
               ctx.restore();
-            }
-            if (chargeBatch.length > 0 && polyRenderer) {
-              if (typeof polyRenderer.drawBatch === 'function') polyRenderer.drawBatch(ctx, chargeBatch, time);
-              else chargeBatch.forEach(it => polyRenderer.drawComponent(ctx, it.cx, it.cy, it.radius, it.colorName, time, false, false, 1.0, it.seedPhase, it.seedTilt));
+
+              if (filled && polyRenderer?.drawComponent) {
+                const polyR = rSlot * 0.68;
+                polyRenderer.drawComponent(ctx, s.x, s.y, polyR, 'orange', time, false, false, 1.0, seed.phase, seed.tilt);
+              }
             }
           }
         });

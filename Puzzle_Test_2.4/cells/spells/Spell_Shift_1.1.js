@@ -192,7 +192,9 @@
       const spellEntry = {
         type: 'shift', spellIndex: shiftIdx, originalTiles: new Map(this.originalTilesBackup),
         finalTiles, spell: shiftSpell, name: 'Shift',
-        placedCenter: this.placedCenter ? { ...this.placedCenter } : { q: 0, r: 0 }
+        placedCenter: this.placedCenter ? { ...this.placedCenter } : { q: 0, r: 0 },
+        previousLockedSigilIds: new Set(state.lockedSigilIds || []),
+        previousDormantSigilIds: new Set(global.SigilResolver?.dormantSigilIds || [])
       };
 
       if (shiftIdx !== null && shiftIdx < state.spellbook.length) state.spellbook.splice(shiftIdx, 1);
@@ -277,9 +279,11 @@
     if (entry.originalTiles) {
       for (const [tk, snapshot] of entry.originalTiles) this._restoreTile(state.board.get(tk), tk, snapshot, state);
     }
+    if (entry.previousLockedSigilIds) state.lockedSigilIds = new Set(entry.previousLockedSigilIds);
     const insertIdx = Math.min(entry.spellIndex !== undefined ? entry.spellIndex : 0, state.spellbook.length);
     if (entry.spell) state.spellbook.splice(insertIdx, 0, entry.spell);
     if (global.SigilResolver) {
+      if (entry.previousDormantSigilIds) global.SigilResolver.dormantSigilIds = new Set(entry.previousDormantSigilIds);
       state.placedThisTurn ? global.SigilResolver.restoreSigilStageIfPlaced(state.board, { animate: false })
         : (global.SigilResolver.evaluateSigils(state.board), global.SigilResolver.resolveInitialSigils(state.board, { animate: false }));
     }

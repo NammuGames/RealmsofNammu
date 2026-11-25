@@ -89,27 +89,8 @@
           resolver.lockedSigilIds.delete(id); resolver.dormantSigilIds.delete(id); resolver.savedWildSelections?.delete(id);
         });
 
-        // Detonate and remove resonant Arch pseudo-sigils from the board
+        // Remove resonant Arch pseudo-sigils from the board (resonant Phase-Arch disease is already handled in Step 3)
         if (resonantArchZoneIds.size > 0 && state.archZones) {
-          global.SpellArch?.syncArchZones?.(state.archZones);
-          let phasedArchDisease = false;
-          state.archZones.forEach(z => {
-            if (!resonantArchZoneIds.has(z.id) && !resonantArchZoneIds.has(`${z.center?.q},${z.center?.r}`)) return;
-            if (z.enchantment === 'phase') {
-              (z.flowerTiles || []).forEach(tk => {
-                const t = state.board?.get(tk);
-                if (t && (t.color === 'disease' || t.plagueId)) {
-                  const pId = t.plagueId || (global.ComponentDisease?.shapes ? Array.from(global.ComponentDisease.shapes.values()).find(s => s.components.some(c => c.key === tk))?.id : null);
-                  if (pId && global.ComponentDisease?.destroyPlagueShape) {
-                    global.ComponentDisease.destroyPlagueShape(pId, 'phase', tk);
-                    phasedArchDisease = true;
-                  }
-                  t.color = null; t.plagueId = null;
-                }
-              });
-            }
-          });
-          if (phasedArchDisease && global.AudioSynth?.playDiseaseDestroy) global.AudioSynth.playDiseaseDestroy();
           state.archZones = state.archZones.filter(z => !resonantArchZoneIds.has(z.id) && !resonantArchZoneIds.has(`${z.center?.q},${z.center?.r}`));
         }
 

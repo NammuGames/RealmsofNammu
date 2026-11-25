@@ -175,6 +175,8 @@
           type: 'manifest', name: 'Manifest', formula: 'RRB', spell: 'Manifest',
           tilesPlaced, previousBag: [...this.originalBagBackup],
           placedCenter: this.placedCenter ? { ...this.placedCenter } : { q: 0, r: 0 },
+          previousLockedSigilIds: new Set(state.lockedSigilIds || []),
+          previousDormantSigilIds: new Set(global.SigilResolver?.dormantSigilIds || []),
           spellbookIndex: (mIdx !== null) ? mIdx : 0, spellData
         });
       }
@@ -254,10 +256,12 @@
     if (!state || !entry) return false;
     if (entry.tilesPlaced) { for (const t of entry.tilesPlaced) this._restoreTile(state.board.get(t.key), t.key, t.prevTileState, state); }
     if (entry.previousBag) state.componentsBag = entry.previousBag.map(c => (typeof c === 'object' && c) ? { ...c } : c);
+    if (entry.previousLockedSigilIds) state.lockedSigilIds = new Set(entry.previousLockedSigilIds);
     const restoredSpell = entry.spellData || { formula: 'RRB', element: 'Heat', name: 'Form', usableRound: state.round };
     const insertIdx = (entry.spellbookIndex !== undefined && entry.spellbookIndex <= state.spellbook.length) ? entry.spellbookIndex : state.spellbook.length;
     state.spellbook.splice(insertIdx, 0, restoredSpell);
     if (global.SigilResolver && state.board) {
+      if (entry.previousDormantSigilIds) global.SigilResolver.dormantSigilIds = new Set(entry.previousDormantSigilIds);
       state.placedThisTurn ? global.SigilResolver.restoreSigilStageIfPlaced(state.board, { animate: false }) : (global.SigilResolver.evaluateSigils(state.board), global.SigilResolver.resolveInitialSigils(state.board, { animate: false }));
     }
     const c = entry.placedCenter || { q: 0, r: 0 };

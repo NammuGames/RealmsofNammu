@@ -300,6 +300,10 @@
         if (global.BorderTuningLab) global.BorderTuningLab.init(dom, audio);
         if (global.WarpHaloTuningLab) global.WarpHaloTuningLab.init(dom, audio);
         if (global.AudioTuningLab) global.AudioTuningLab.init(dom, audio);
+        if (global.__NAMMU_DEV_DRAWERS__) {
+          if (global.BoardEditLab) global.BoardEditLab.init();
+          if (global.BoardEditRenderer) global.BoardEditRenderer.init();
+        }
         if (global.EmblemTunerHUD) global.EmblemTunerHUD.init();
         if (global.GameSettingsCanvas) global.GameSettingsCanvas.init(engine);
 

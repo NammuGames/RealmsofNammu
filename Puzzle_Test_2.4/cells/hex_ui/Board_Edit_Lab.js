@@ -26,6 +26,7 @@
       this.cursor = { q: 0, r: 0 };
       this.upDownAxisState = 0;
       this._hooksInstalled = false;
+      this._uiBound = false;
     }
 
     getCurrentComponent() {
@@ -39,6 +40,8 @@
     }
 
     bindUI() {
+      if (this._uiBound) return;
+      this._uiBound = true;
       const toggleBtn = document.getElementById('btn-edit-toggle');
       if (toggleBtn) {
         toggleBtn.addEventListener('click', () => {

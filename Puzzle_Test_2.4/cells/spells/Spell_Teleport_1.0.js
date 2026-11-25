@@ -111,6 +111,12 @@
         return false;
       }
 
+      const prevLockedSigilIds = new Set(state.lockedSigilIds || []);
+      const prevDormantSigilIds = new Set(global.SigilResolver?.dormantSigilIds || []);
+      const prevWildSelections = global.SigilResolver?.savedWildSelections
+        ? new Map(Array.from(global.SigilResolver.savedWildSelections.entries()).map(([k, v]) => [k, { ...v }]))
+        : null;
+
       // Auto-lock dormant sigil if selected
       const isDormant = (state.dormantSigilIds && state.dormantSigilIds.has(targetSigil.id)) ||
         (state.allCandidates && (!state.lockedSigilIds || !state.lockedSigilIds.has(targetSigil.id)));
@@ -139,7 +145,8 @@
       const held = {
         id: targetSigil.id, formula: targetSigil.formula, element: targetSigil.element, spell: targetSigil.spell,
         originalVertex: { ...state.sigilCursorVertex }, originalTiles: components.map(c => ({ ...c })),
-        components, colors: components.map(c => c.color)
+        components, colors: components.map(c => c.color),
+        prevLockedSigilIds, prevDormantSigilIds, prevWildSelections
       };
 
       const coords = vTiles.map(tk => {

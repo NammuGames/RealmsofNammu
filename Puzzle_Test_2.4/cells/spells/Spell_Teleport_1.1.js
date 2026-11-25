@@ -62,6 +62,8 @@
     const rot = this.teleportRotation || 0;
     const targetTiles = global.HexMath.getVertexTiles(state.sigilCursorVertex);
     const targetSnapshots = [];
+    const prePlaceLockedSigilIds = new Set(state.lockedSigilIds || []);
+    const prePlaceDormantSigilIds = new Set(global.SigilResolver?.dormantSigilIds || []);
     let hadAnnihilation = false;
     const comps = held.components;
 
@@ -98,17 +100,18 @@
         return;
       }
 
-      // 3. Standard / vacant placement
-      this._restoreTile(tile, comp, tk, state);
+      // 3. Standard / vacant placement (do not carry stale underneath metadata from the source tiles)
+      this._restoreTile(tile, { ...comp, underneath: null, sigilId: null }, tk, state);
     });
 
     const triKeys = targetTiles.slice().sort();
     const newSigilId = 'sigil_' + triKeys.join('|');
     if (!hadAnnihilation) state.lockedSigilIds.add(newSigilId);
 
+    const placeOpts = !hadAnnihilation ? { prioritizeIds: [newSigilId] } : {};
     if (global.SigilResolver) {
-      if (state.placedThisTurn) global.SigilResolver.restoreSigilStageIfPlaced(state.board);
-      else { global.SigilResolver.evaluateSigils(state.board); global.SigilResolver.resolveInitialSigils(state.board); }
+      if (state.placedThisTurn) global.SigilResolver.restoreSigilStageIfPlaced(state.board, placeOpts);
+      else { global.SigilResolver.evaluateSigils(state.board); global.SigilResolver.resolveInitialSigils(state.board, placeOpts); }
       state.selectedSigilId = null;
     } else if (global.SigilEngine) {
       state.allCandidates = global.SigilEngine.findCandidates(state.board);
@@ -129,6 +132,9 @@
         spell: consumedSpell, spellIndex: sIdx, originalSigilId: held.id,
         originalTiles: held.originalTiles ? held.originalTiles.slice() : [],
         targetTiles: targetTiles.slice(), targetSnapshots, newSigilId,
+        previousLockedSigilIds: held.prevLockedSigilIds ? new Set(held.prevLockedSigilIds) : prePlaceLockedSigilIds,
+        previousDormantSigilIds: held.prevDormantSigilIds ? new Set(held.prevDormantSigilIds) : prePlaceDormantSigilIds,
+        prePlaceLockedSigilIds, prePlaceDormantSigilIds,
         heldSigil: { ...held }, rotation: rot, targetVertex: { ...state.sigilCursorVertex }
       });
     }
@@ -183,10 +189,18 @@
     if (!state || !this.inTeleportMode || !this.teleportHeldSigil || this.isTransitioning) return false;
     const held = this.teleportHeldSigil;
     (held.originalTiles || []).forEach(snap => this._restoreTile(state.board.get(snap.key), snap, snap.key, state));
-    state.lockedSigilIds.add(held.id);
+    if (held.prevLockedSigilIds) state.lockedSigilIds = new Set(held.prevLockedSigilIds);
+    else state.lockedSigilIds.add(held.id);
     if (global.SigilResolver) {
-      if (state.placedThisTurn) global.SigilResolver.restoreSigilStageIfPlaced(state.board, { animate: false });
-      else { global.SigilResolver.evaluateSigils(state.board); global.SigilResolver.resolveInitialSigils(state.board, { animate: false }); }
+      if (held.prevDormantSigilIds) global.SigilResolver.dormantSigilIds = new Set(held.prevDormantSigilIds);
+      if (held.prevWildSelections) {
+        global.SigilResolver.savedWildSelections = new Map(
+          Array.from(held.prevWildSelections.entries()).map(([k, v]) => [k, { ...v }])
+        );
+      }
+      const unpickOpts = { animate: false, prioritizeIds: held.id ? [held.id] : undefined };
+      if (state.placedThisTurn) global.SigilResolver.restoreSigilStageIfPlaced(state.board, unpickOpts);
+      else { global.SigilResolver.evaluateSigils(state.board); global.SigilResolver.resolveInitialSigils(state.board, unpickOpts); }
     } else if (global.SigilEngine) {
       state.allCandidates = global.SigilEngine.findCandidates(state.board);
       state.overlapsMap = global.SigilEngine.computeOverlaps(state.allCandidates);
@@ -274,7 +288,12 @@
     const insertIdx = Math.min(entry.spellIndex ?? 0, state.spellbook.length);
     if (entry.spell) state.spellbook.splice(insertIdx, 0, entry.spell);
 
+    let undoPrioritizeIds;
     if (entry.heldSigil) {
+      if (entry.prePlaceLockedSigilIds) state.lockedSigilIds = new Set(entry.prePlaceLockedSigilIds);
+      if (entry.prePlaceDormantSigilIds && global.SigilResolver) {
+        global.SigilResolver.dormantSigilIds = new Set(entry.prePlaceDormantSigilIds);
+      }
       this.inTeleportMode = true; state.inTeleportMode = true;
       this.teleportSpellIndex = insertIdx; state.teleportSpellIndex = insertIdx;
       this.teleportHeldSigil = { ...entry.heldSigil }; state.teleportHeldSigil = this.teleportHeldSigil;
@@ -284,12 +303,18 @@
       global.UISidebarDeck?.closeSpellbookColumn();
     } else {
       if (entry.originalTiles) entry.originalTiles.forEach(snap => this._restoreTile(state.board.get(snap.key), snap, snap.key, state));
-      if (entry.originalSigilId) state.lockedSigilIds.add(entry.originalSigilId);
+      if (entry.previousLockedSigilIds) state.lockedSigilIds = new Set(entry.previousLockedSigilIds);
+      else if (entry.originalSigilId) state.lockedSigilIds.add(entry.originalSigilId);
+      if (entry.previousDormantSigilIds && global.SigilResolver) {
+        global.SigilResolver.dormantSigilIds = new Set(entry.previousDormantSigilIds);
+      }
+      if (entry.originalSigilId) undoPrioritizeIds = [entry.originalSigilId];
     }
 
     if (global.SigilResolver) {
-      if (state.placedThisTurn) global.SigilResolver.restoreSigilStageIfPlaced(state.board, { animate: false });
-      else { global.SigilResolver.evaluateSigils(state.board); global.SigilResolver.resolveInitialSigils(state.board, { animate: false }); }
+      const undoOpts = { animate: false, prioritizeIds: undoPrioritizeIds };
+      if (state.placedThisTurn) global.SigilResolver.restoreSigilStageIfPlaced(state.board, undoOpts);
+      else { global.SigilResolver.evaluateSigils(state.board); global.SigilResolver.resolveInitialSigils(state.board, undoOpts); }
     } else if (global.SigilEngine) {
       state.allCandidates = global.SigilEngine.findCandidates(state.board);
       state.overlapsMap = global.SigilEngine.computeOverlaps(state.allCandidates);

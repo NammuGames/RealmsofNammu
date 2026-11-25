@@ -78,11 +78,24 @@
       const hexMath = global.HexMath;
       const candidates = [];
 
-      // 1. Query board tiles with Burn or Phase covering disease
+      // Synchronize resonance state before querying Phase / Phase-Arch hits
+      global.SigilResolver?.syncBoardSigilTiles?.(state.board);
+      const resonantSigilIds = global.SigilResolver?.resonantSigils || new Set();
+      const resonantArchZoneIds = global.SigilResolver?.resonantArchZoneIds || global.SigilEngine?.lastResonantArchZoneIds || new Set();
+      const resonantPhaseTileKeys = new Set();
+      if (resonantSigilIds.size > 0 && global.SigilResolver?.activeSigils) {
+        global.SigilResolver.activeSigils.forEach(s => {
+          if (resonantSigilIds.has(s.id) && Array.isArray(s.tiles)) {
+            s.tiles.forEach(tk => resonantPhaseTileKeys.add(tk));
+          }
+        });
+      }
+
+      // 1. Query board tiles with Burn or resonant-sigil Phase covering disease
       for (const [tk, tile] of state.board.entries()) {
         if (!tile) continue;
         const isBurn = !!tile.burned;
-        const isPhase = !!tile.phased;
+        const isPhase = !!tile.phased && resonantPhaseTileKeys.has(tk);
         if (!isBurn && !isPhase) continue;
 
         const under = tile.underneath;
@@ -118,12 +131,13 @@
         }
       }
 
-      // Query Arch zones with Burn or Phase covering disease
+      // Query Arch zones with Burn or resonant Phase covering disease
       if (state.archZones && state.archZones.length > 0) {
         global.SpellArch?.syncArchZones?.(state.archZones);
         state.archZones.forEach(z => {
+          const zKey = `${z.center?.q},${z.center?.r}`;
           const isBurnArch = (z.enchantment === 'burn');
-          const isPhaseArch = (z.enchantment === 'phase');
+          const isPhaseArch = (z.enchantment === 'phase') && (resonantArchZoneIds.has(z.id) || resonantArchZoneIds.has(zKey));
           if (isBurnArch || isPhaseArch) {
             (z.flowerTiles || []).forEach(tk => {
               const t = state.board.get(tk);
@@ -219,7 +233,22 @@
             const directTile = state.board.get(entry.tk);
             if (directTile) {
               directTile.underneath = null;
-              if (entry.type === 'burn') { directTile.color = null; directTile.sigilId = null; clearedKeys.add(entry.tk); }
+              directTile.plagueId = null;
+              if (entry.type === 'burn') {
+                directTile.color = null; directTile.sigilId = null; directTile.coveredComponent = null;
+                clearedKeys.add(entry.tk);
+              } else if (!directTile.phased) {
+                if (directTile.coveredComponent) {
+                  directTile.color = directTile.coveredComponent.color;
+                  directTile.sigilId = directTile.coveredComponent.sigilId || null;
+                  directTile.fortified = directTile.coveredComponent.fortified || false;
+                  directTile.lockOwner = directTile.coveredComponent.lockOwner || null;
+                  directTile.coveredComponent = null;
+                } else {
+                  directTile.color = null; directTile.sigilId = null;
+                  clearedKeys.add(entry.tk);
+                }
+              }
             }
             if (entry.shape?.components) {
               entry.shape.components.forEach(comp => {

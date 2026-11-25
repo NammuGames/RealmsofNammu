@@ -90,9 +90,17 @@
      */
     resolveInitialSigils(board, options = {}) {
       const validCandIds = new Set(this.allCandidates.map(c => c.id));
-      const previouslyLocked = new Set(
-        Array.from(this.lockedSigilIds).filter(id => validCandIds.has(id))
-      );
+      const rawLocked = Array.from(this.lockedSigilIds).filter(id => validCandIds.has(id));
+      const prioritySet = options.prioritizeIds ? new Set(options.prioritizeIds) : null;
+      if (prioritySet && prioritySet.size > 0) {
+        rawLocked.sort((a, b) => (prioritySet.has(a) === prioritySet.has(b) ? 0 : (prioritySet.has(a) ? -1 : 1)));
+      }
+      const previouslyLocked = new Set();
+      for (const id of rawLocked) {
+        const oids = this.overlapsMap.get(id) || new Set();
+        const conflictsWithAccepted = Array.from(oids).some(oid => previouslyLocked.has(oid));
+        if (!conflictsWithAccepted) previouslyLocked.add(id);
+      }
       const previouslyDormant = new Set(this.dormantSigilIds);
       const previouslyPairs = new Set((this.resonantPairs || []).flatMap(p => [`${p[0]?.id}:::${p[1]?.id}`, `${p[1]?.id}:::${p[0]?.id}`]));
 

@@ -102,8 +102,8 @@
   };
 
   /**
-   * Plays Off-Board Disease Destruction: identical to disease destruction cascade except
-   * all colored elements render in plague grey (#64748b), resulting in a floating Damage Token.
+   * Plays Off-Board Disease Damage: spawns the floating grey Damage Token from the off-board
+   * disease shape with plague-grey board pulses and ripple, keeping the disease body intact.
    */
   proto.playOffBoardDiseaseDamageAnimation = function(shape, onComplete, durationSec = H3_SEC) {
     const dur = durationSec || H3_SEC;
@@ -112,7 +112,6 @@
       ? shape.components.map(c => ({ q: c.q, r: c.r })) : [];
     const primary = shape?.components?.find(c => !c.onBoard) || shape?.components?.[0] || { q: 0, r: 0 };
     const bands = Math.max(1, boardTokens.length), preColor = '#64748b';
-    boardTokens.forEach(tk => this.activeTileAnims.set(`${tk.q},${tk.r}`, { scale: 1.0, alpha: 1.0 }));
     let rippleFired = false;
     const meta = this._getNextDamageTokenMeta(dur);
     const anim = {
@@ -127,10 +126,7 @@
       type: 'disease_destruction', coords: [], color: preColor, elapsed: 0, duration: dur,
       maxRadius: 0, thickness: 0, bands: 0, alpha0: 0,
       onTick: (t) => {
-        const sBoard = t <= 0.5 ? 1.0 : Math.max(0.0, 1.0 - (t - 0.5) / 0.5);
         const sPre = t <= 0.5 ? 0.0 : Math.min(1.0, (t - 0.5) / 0.5);
-        boardTokens.forEach(tk => this.activeTileAnims.set(`${tk.q},${tk.r}`, { scale: sBoard, alpha: 1.0 }));
-        anim.scaleBoard = sBoard;
         anim.scalePre = sPre;
         if (!rippleFired && t >= rippleStartT) {
           rippleFired = true;
@@ -138,7 +134,6 @@
         }
       },
       onComplete: () => {
-        boardTokens.forEach(tk => this.activeTileAnims.delete(`${tk.q},${tk.r}`));
         if (!this.persistentDamageTokens) this.persistentDamageTokens = [];
         this.persistentDamageTokens.push({ q: primary.q, r: primary.r, color: preColor, componentColor: 'disease', spawnTime: anim.tokenSpawnTime, tokenIdx: anim.tokenIdx });
         const idx = animList.indexOf(anim);

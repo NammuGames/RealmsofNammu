@@ -50,29 +50,17 @@
         }
       }
 
-      // 2. Off-Board Plague Shapes
+      // 2. Off-Board Plague Shapes (persist off-board across turns until purged or slithered back on-board)
       let offBoardPlagueDamage = 0;
       if (global.ComponentDisease && global.ComponentDisease.shapes) {
-        const shapes = Array.from(global.ComponentDisease.shapes.values());
-        for (const shape of shapes) {
-          if (shape.offBoard) {
-            offBoardPlagueDamage += 1;
-            global.ComponentDisease.shapes.delete(shape.id);
-            shape.components.forEach(c => {
-              if (c.onBoard && state.board) {
-                const t = state.board.get(c.key);
-                if (t && t.plagueId === shape.id) {
-                  t.color = null;
-                  t.plagueId = null;
-                }
-              }
-            });
-          }
+        for (const shape of global.ComponentDisease.shapes.values()) {
+          if (shape.offBoard) offBoardPlagueDamage += 1;
         }
       }
       totalDamage = offBoardCount + coveredCount + offBoardPlagueDamage;
     }
-    state.activeDamageTiles = []; // Clear off-board tiles now that damage is inflicted
+    // Keep persistent off-board plague segments; clear player overhang & already-teleported placed-plague entries
+    state.activeDamageTiles = (state.activeDamageTiles || []).filter(d => !!d.plagueShapeId);
     const pendingHeal = state.pendingHeal || 0;
     state.pendingHeal = 0; // Clear staged pending heal as it resolves into net vitality
     let netHp = state.hp + pendingHeal - totalDamage;
@@ -218,32 +206,11 @@
             }
           } else if (ev.kind === 'offBoardShape') {
             const shape = ev.shape;
-            const cleanupShape = () => {
-              if (shape.components && state.board) {
-                shape.components.forEach(c => {
-                  if (c.onBoard) {
-                    const t = state.board.get(c.key || `${c.q},${c.r}`);
-                    if (t) {
-                      if (t.coveredComponent) t.coveredComponent = null;
-                      if (t.plagueId === shape.id || t.color === 'disease') { t.color = null; t.plagueId = null; }
-                    }
-                  }
-                });
-              }
-              if (state.activeDamageTiles) {
-                state.activeDamageTiles = state.activeDamageTiles.filter(d =>
-                  d.plagueShapeId !== shape.id && (!shape.components || !shape.components.some(c => c.q === d.q && c.r === d.r))
-                );
-              }
-              global.ComponentDisease?.shapes?.delete(shape.id);
-            };
             if (rr?.playOffBoardDiseaseDamageAnimation) {
               rr.playOffBoardDiseaseDamageAnimation(shape, () => {
-                cleanupShape();
                 finishOne();
               });
             } else {
-              cleanupShape();
               finishOne();
             }
           } else {

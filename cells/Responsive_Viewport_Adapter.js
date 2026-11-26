@@ -150,21 +150,39 @@
       this.overlayEl = el;
     }
 
+    _isStandaloneMode() {
+      if (typeof global !== 'undefined' && global.navigator?.standalone === true) return true;
+      if (typeof global !== 'undefined' && typeof global.matchMedia === 'function') {
+        return !!(global.matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
+      }
+      return false;
+    }
+
     _isFullscreenActive() {
       if (typeof document === 'undefined') return false;
       return !!(document.fullscreenElement || document.webkitFullscreenElement);
     }
 
     _requestMobileFullscreen() {
-      if (typeof document === 'undefined' || this._isFullscreenActive()) {
+      if (typeof document === 'undefined' || this._isStandaloneMode() || this._isFullscreenActive()) {
+        this._wantsLandscapeFullscreen = false;
+        return;
+      }
+      if (document.fullscreenEnabled === false) {
         this._wantsLandscapeFullscreen = false;
         return;
       }
       const root = document.documentElement;
-      const req = root?.requestFullscreen || root?.webkitRequestFullscreen;
-      if (typeof req !== 'function') return;
+      const stdReq = root?.requestFullscreen;
+      const wkReq = root?.webkitRequestFullscreen;
+      if (typeof stdReq !== 'function' && typeof wkReq !== 'function') {
+        this._wantsLandscapeFullscreen = false;
+        return;
+      }
       try {
-        const res = req.call(root, { navigationUI: 'hide' });
+        const res = (typeof stdReq === 'function')
+          ? stdReq.call(root, { navigationUI: 'hide' })
+          : wkReq.call(root);
         if (res && typeof res.then === 'function') {
           res.then(() => { this._wantsLandscapeFullscreen = false; }).catch(() => {});
         }

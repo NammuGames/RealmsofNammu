@@ -147,8 +147,8 @@
 
       let totalGrown = 0, totalMoved = 0, totalCovered = 0;
 
-      // Iterate through all active on-board Plague Shapes
-      const activeShapes = Array.from(this.shapes.values()).filter(s => s && !s.offBoard);
+      // Iterate through all active Plague Shapes (off-board shapes persist and must grow onto valid on-board tiles)
+      const activeShapes = Array.from(this.shapes.values()).filter(Boolean);
 
       // Sort active shapes by lowest Tile ID among all constituent tile locations
       const getShapeLowestTileId = (s) => {
@@ -163,7 +163,7 @@
       activeShapes.sort((a, b) => getShapeLowestTileId(a) - getShapeLowestTileId(b));
 
       const growSingleShape = (shape, sIdx, stepDone) => {
-        if (!shape || shape.offBoard) { stepDone?.(); return; }
+        if (!shape) { stepDone?.(); return; }
 
         // Step 1: For 4-part bodies, select least-connected component (protecting bridges from removal)
         let partToRemove = null, remainingParts = shape.components;
@@ -190,6 +190,7 @@
 
             // Cannot grow onto existing disease/plague component on-board
             const isOnBoard = state.isInsideBoard(nq, nr);
+            if (shape.offBoard && !isOnBoard) continue; // Off-board disease cannot grow further off-board
             const boardTile = isOnBoard ? state.board.get(nKey) : null;
             if (boardTile && (boardTile.color === 'disease' || boardTile.plagueId)) continue;
 
@@ -223,7 +224,7 @@
             state.activeDamageTiles.push({ q: chosen.q, r: chosen.r, color: 'disease', isDisease: true, plagueShapeId: shape.id });
           }
           if (global.UISidebars) {
-            global.UISidebars.showToast(`⚠️ PLAGUE OFF-BOARD: Plague ${shape.id} breached the hull! Entire shape (+${shape.components.length + (partToRemove ? 0 : 1)} HP) pending removal.`);
+            global.UISidebars.showToast(`⚠️ PLAGUE OFF-BOARD: Plague ${shape.id} breached the hull! (-1 HP/turn until purged or slithered back)`);
           }
         } else {
           // On-board growth onto non-enchanted tile
@@ -252,7 +253,7 @@
 
           if (!chosen.onBoard && state.activeDamageTiles) {
             shape.components.forEach(c => {
-              if (!state.activeDamageTiles.some(d => d.q === c.q && d.r === c.r)) {
+              if (!c.onBoard && !state.activeDamageTiles.some(d => d.q === c.q && d.r === c.r)) {
                 state.activeDamageTiles.push({ q: c.q, r: c.r, color: 'disease', isDisease: true, plagueShapeId: shape.id });
               }
             });
@@ -295,9 +296,10 @@
             if (!shape.components.some(c => c.key === chosen.key)) {
               shape.components.push({ q: chosen.q, r: chosen.r, key: chosen.key, onBoard: chosen.onBoard });
             }
-            if (state.activeDamageTiles && (shape.offBoard || !chosen.onBoard)) {
+            shape.offBoard = shape.components.some(c => !c.onBoard);
+            if (state.activeDamageTiles && shape.offBoard) {
               shape.components.forEach(c => {
-                if (!state.activeDamageTiles.some(d => d.q === c.q && d.r === c.r)) {
+                if (!c.onBoard && !state.activeDamageTiles.some(d => d.q === c.q && d.r === c.r)) {
                   state.activeDamageTiles.push({ q: c.q, r: c.r, color: 'disease', isDisease: true, plagueShapeId: shape.id });
                 }
               });

@@ -27,9 +27,11 @@
     state.activeDamageTiles = state.activeDamageTiles.filter(d => d.plagueShapeId !== shape.id);
     if (shape.offBoard) {
       shape.components.forEach(c => {
-        state.activeDamageTiles.push({
-          q: c.q, r: c.r, color: 'disease', isDisease: true, plagueShapeId: shape.id
-        });
+        if (!c.onBoard) {
+          state.activeDamageTiles.push({
+            q: c.q, r: c.r, color: 'disease', isDisease: true, plagueShapeId: shape.id
+          });
+        }
       });
     }
   };
